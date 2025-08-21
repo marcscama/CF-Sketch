@@ -22,47 +22,39 @@
   <div id="northarrow"></div>
   <div id="navigation"></div>
 </div>
-
 <!-- popup -->
 <div id="popup">
   <div id="closebtn">&times;</div>
   <div id="popupbar"></div>
   <div id="popupbody">
     <div id="popupcontent"></div>
-
     <!-- query result -->
     <div id="queryresult">
       <table id="qr_coords_table">
         <caption>Clicked coordinates <div id="zoomtopoint" class="action-zoom zoombtn"></div></caption>
         <tr><td id="qr_coords"></td></tr>
       </table>
-
       <table id="qr_layername_table">
         <caption>Layer <div id="zoomtolayer" class="action-zoom zoombtn"></div></caption>
         <tr><td id="qr_layername"></td></tr>
       </table>
-
       <table id="qr_attrs_table">
         <caption>Attributes</caption>
       </table>
-
       <!-- camera actions and measure tool -->
       <div id="orbitbtn" class="action-btn action-orbit">Orbit</div>
       <div id="measurebtn" class="action-btn">Measure distance</div>
     </div>
-
     <!-- page info -->
     <div id="pageinfo">
       <h1>Current View URL</h1>
       <div><input id="urlbox" type="text"></div>
-
       <h1>Usage</h1>
       <table id="usage">
         <tr><td colspan="2" class="star">Mouse</td></tr>
         <tr><td>Left button + Move</td><td>Orbit</td></tr>
         <tr><td>Mouse Wheel</td><td>Zoom</td></tr>
         <tr><td>Right button + Move</td><td>Pan</td></tr>
-
         <tr><td colspan="2" class="star">Keys</td></tr>
         <tr><td>Arrow keys</td><td>Move Horizontally</td></tr>
         <tr><td>Shift + Arrow keys</td><td>Orbit</td></tr>
@@ -74,7 +66,6 @@
         <tr><td>Shift + R</td><td>Reset Camera Position</td></tr>
         <tr><td>Shift + S</td><td>Save Image</td></tr>
       </table>
-
       <h1>About</h1>
       <div id="about"><img src="./Qgis2threejs.png">
         This page was made with <a href="https://www.qgis.org/">QGIS</a> and <a href="https://github.com/minorua/Qgis2threejs">Qgis2threejs</a> plugin (version 2.8).
@@ -84,44 +75,35 @@
     </div>
   </div>
 </div>
-
 <!-- progress bar -->
 <div id="progress"><div id="progressbar"></div></div>
-
 <!-- menu -->
 <div id="toolbtns">
   <div id="layerbtn"></div>
   <div id="animbtn" class="hidden"></div>
   <div id="infobtn"></div>
 </div>
-
 <!-- header and footer -->
 <div id="header"></div>
 <div id="footer"></div>
-
 <!-- layer panel -->
 <div id="layerpanel">
   <div id="layerlist"></div>
 </div>
-
 <!-- animation -->
 <div id="narrativebox" class="ef1">
   <div id="narbody">
-
   </div>
   <div id="nextbtn"></div>
 </div>
-
 <script>
 Q3D.Config.allVisible = true;
 Q3D.Config.bgColor = 0xffffff;
 Q3D.Config.viewpoint = {lookAt:{x:426248.434989865,y:4517666.811603576,z:-1.1839921050606837e-15},pos:{x:432420.6401290015,y:4504911.042410877,z:3937.8688261482375}};
 Q3D.Config.localMode = true;
-
 var container = document.getElementById("view"),
     app = Q3D.application,
     gui = Q3D.gui;
-
 app.init(container);       // initialize viewer
 // Sostituisci SOLO il contenuto (senza <script> wrapper) nel blocco dove hai messo il commento
 app.loadSceneFile("./data/index/scene.js",
@@ -136,21 +118,17 @@ app.loadSceneFile("./data/index/scene.js",
       const threeScene = (scene && scene.isScene) ? scene : (app && app.scene) || window.scene;
       const camera = (app && app.camera) || window.camera || (window.viewer && viewer.camera);
       const renderer = (app && app.renderer) || window.renderer || (window.viewer && viewer.renderer);
-
       console.log('Callback all files loaded - scene, camera, renderer:', !!threeScene, !!camera, !!renderer);
-
       if (!THREE || !threeScene || !camera || !renderer) {
         console.warn('Ambiente rendering non disponibile nel callback (THREE/scene/camera/renderer).');
         return;
       }
-
       const dtm = threeScene.getObjectByName('DTM');
       if (!dtm) {
         console.warn('DTM non trovato nella scena (getObjectByName("DTM")).');
         return;
       }
       console.log('DTM trovato:', dtm.name);
-
       // crea lo stile etichette se serve
       if (!document.getElementById('label2d-style')) {
         const s = document.createElement('style');
@@ -171,7 +149,6 @@ app.loadSceneFile("./data/index/scene.js",
         }`;
         document.head.appendChild(s);
       }
-
       // make DTM always visible
       dtm.traverse(n => {
         if (n.isMesh) {
@@ -188,15 +165,12 @@ app.loadSceneFile("./data/index/scene.js",
           n.renderOrder = 999;
         }
       });
-
       // parallelepipedo params
       const DEPTH = 10000;
       const STEP = 1000;
       const OFFSET_PX = 30;
-
       // bbox DTM
       const bb = new THREE.Box3().setFromObject(dtm);
-
       // determina asse verticale
       const totalBbox = new THREE.Box3().setFromObject(threeScene);
       const totalSize = new THREE.Vector3(); totalBbox.getSize(totalSize);
@@ -204,14 +178,11 @@ app.loadSceneFile("./data/index/scene.js",
       if (totalSize.x <= totalSize.y && totalSize.x <= totalSize.z) vertIndex = 0;
       else if (totalSize.z <= totalSize.x && totalSize.z <= totalSize.y) vertIndex = 2;
       const axes2 = [0,1,2].filter(i => i !== vertIndex);
-
       // corner basso-destra (2D)
       const maxA = bb.max.getComponent(axes2[0]);
       const minB = bb.min.getComponent(axes2[1]);
-
       const topZ = bb.max.getComponent(vertIndex);
       const bottomZ = topZ - DEPTH;
-
       const topCorners = [
         new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ),
         new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], bb.max.getComponent(axes2[1])).setComponent(vertIndex, topZ),
@@ -219,7 +190,6 @@ app.loadSceneFile("./data/index/scene.js",
         new THREE.Vector3().setComponent(axes2[0], bb.min.getComponent(axes2[0])).setComponent(axes2[1], minB).setComponent(vertIndex, topZ)
       ];
       const bottomCorners = topCorners.map(c => c.clone().setComponent(vertIndex, bottomZ));
-
       const matLine = new THREE.LineBasicMaterial({ color: 0x000000 });
       function addLine(p1, p2) {
         const geom = new THREE.BufferGeometry().setFromPoints([p1.clone(), p2.clone()]);
@@ -227,13 +197,11 @@ app.loadSceneFile("./data/index/scene.js",
         threeScene.add(l);
         return l;
       }
-
       addLine(topCorners[0], topCorners[1]); addLine(topCorners[1], topCorners[2]);
       addLine(topCorners[2], topCorners[3]); addLine(topCorners[3], topCorners[0]);
       addLine(bottomCorners[0], bottomCorners[1]); addLine(bottomCorners[1], bottomCorners[2]);
       addLine(bottomCorners[2], bottomCorners[3]); addLine(bottomCorners[3], bottomCorners[0]);
       for (let i = 0; i < 4; i++) addLine(topCorners[i], bottomCorners[i]);
-
       // labels on bottom-right column
       const labels = [];
       const cornerTop = topCorners[0].clone();
@@ -244,10 +212,8 @@ app.loadSceneFile("./data/index/scene.js",
       const dirOut = cornerTop.clone().setComponent(vertIndex, 0).sub(centerFoot.clone().setComponent(vertIndex, 0));
       if (dirOut.lengthSq() < 1e-6) { dirOut.setComponent(axes2[0], 1); dirOut.setComponent(axes2[1], 0); }
       dirOut.setComponent(vertIndex, 0); dirOut.normalize();
-
       const footprintSize = Math.max(bb.getSize(new THREE.Vector3()).x, bb.getSize(new THREE.Vector3()).y);
       const labelOffset = OFFSET_PX * 0.01 * footprintSize;
-
       for (let d = STEP; d <= DEPTH; d += STEP) {
         const z = topZ - d;
         const pos = cornerTop.clone().setComponent(vertIndex, z);
@@ -258,7 +224,6 @@ app.loadSceneFile("./data/index/scene.js",
         document.body.appendChild(div);
         labels.push({ el: div, pos: posOut.clone() });
       }
-
       (function updateLabels() {
         requestAnimationFrame(updateLabels);
         try {
@@ -273,13 +238,12 @@ app.loadSceneFile("./data/index/scene.js",
           }
         } catch (e) { /* ignore */ }
       })();
-
       console.log('Parallelepipedo aggiunto — topZ:', topZ, ' bottomZ:', bottomZ, ' cornerXY:', maxA, minB);
-
     } catch (err) {
       console.error('Errore nel callback parallelepipedo:', err);
     }
   }
 );
+</script>
 </body>
 </html>
