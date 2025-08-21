@@ -10,12 +10,25 @@
 #popup, #header, #layerpanel {
   left: 36px;
 }
+.label2d {
+  padding:2px 6px;
+  background:rgba(255,255,255,0.95);
+  border:1px solid #000;
+  color:#000;
+  font-weight:700;
+  font-size:12px;
+  border-radius:3px;
+  white-space:nowrap;
+  pointer-events:none;
+  position:absolute;
+  transform:translate(-50%,-50%);
+  z-index: 100;
+}
 </style>
 <script src="./threejs/three.min.js"></script>
 <script src="./threejs/OrbitControls.js"></script>
 <script src="./threejs/ViewHelper.js"></script>
 <script src="./threejs/OutlineEffect.js"></script>
-<script src="./threejs/CSS2DRenderer.js"></script>
 <script src="./Qgis2threejs.js"></script>
 </head>
 <body>
@@ -98,10 +111,6 @@
   <div id="nextbtn"></div>
 </div>
 <script>
-// Aggiungiamo CSS2DRenderer per gestire le etichette come oggetti 3D
-let labelRenderer;
-let labelScene;
-
 // Configurazione iniziale
 Q3D.Config.allVisible = true;
 Q3D.Config.bgColor = 0xffffff;
@@ -150,18 +159,6 @@ try {
           return;
         }
 
-        // Creiamo un renderer CSS2D per le etichette
-        labelRenderer = new THREE.CSS2DRenderer();
-        labelRenderer.setSize(container.clientWidth, container.clientHeight);
-        labelRenderer.domElement.style.position = 'absolute';
-        labelRenderer.domElement.style.top = '0';
-        labelRenderer.domElement.style.left = '0';
-        labelRenderer.domElement.style.pointerEvents = 'none';
-        container.appendChild(labelRenderer.domElement);
-
-        // Creiamo una scena separata per le etichette CSS2D
-        labelScene = new THREE.Scene();
-
         // Cerca il layer DTM usando il layerId: 2
         let dtm = null;
 
@@ -180,25 +177,27 @@ try {
 
         console.log('Layer DTM trovato:', dtm.name || 'no name');
 
-        // Stile per le etichette CSS2D
-        const labelStyle = `
-        .label2d {
-          padding:2px 6px;
-          background:rgba(255,255,255,0.95);
-          border:1px solid #000;
-          color:#000;
-          font-weight:700;
-          font-size:12px;
-          border-radius:3px;
-          white-space:nowrap;
-          pointer-events:none;
-          transform:translate(-50%,-50%);
-        }`;
-
-        // Aggiungi lo stile alla pagina
-        const styleElement = document.createElement('style');
-        styleElement.textContent = labelStyle;
-        document.head.appendChild(styleElement);
+        // Crea lo stile per le etichette se non esiste già
+        if (!document.getElementById('label2d-style')) {
+          const s = document.createElement('style');
+          s.id = 'label2d-style';
+          s.textContent = `
+          .label2d {
+            padding:2px 6px;
+            background:rgba(255,255,255,0.95);
+            border:1px solid #000;
+            color:#000;
+            font-weight:700;
+            font-size:12px;
+            border-radius:3px;
+            white-space:nowrap;
+            pointer-events:none;
+            position:absolute;
+            transform:translate(-50%,-50%);
+            z-index: 100;
+          }`;
+          document.head.appendChild(s);
+        }
 
         // Rendi il DTM sempre visibile
         dtm.traverse(n => {
@@ -217,7 +216,7 @@ try {
           }
         });
 
-        // Trova il layer dei terremoti (supponiamo che abbia layerId: 0 come nel tuo esempio)
+        // Trova il layer dei terremoti (supponiamo che abbia layerId: 0)
         let earthquakesLayer = null;
         threeScene.traverse(function(object) {
           if (object.userData && object.userData.layerId === 0) {
@@ -327,9 +326,6 @@ try {
           addLine(topCorners[i], bottomCorners[i]);
         }
 
-        // Inizializza l'array delle etichette
-        const labels = [];
-
         // Creazione delle etichette sulla colonna in basso a destra (topCorners[0] -> bottomCorners[0])
         const centerFoot = new THREE.Vector3();
         centerFoot.setComponent(axes2[0], (maxA + minA) / 2);
@@ -349,6 +345,9 @@ try {
         dirOut.setComponent(vertIndex, 0);
         dirOut.normalize();
 
+        // Array per memorizzare le etichette
+        const labels = [];
+
         // Crea le etichette ogni -1000m lungo la colonna verticale
         for (let d = 1000; d <= DEPTH; d += STEP) {
           const z = topZParallelepiped - d; // negativa
@@ -357,13 +356,13 @@ try {
           const div = document.createElement('div');
           div.className = 'label2d';
           div.textContent = `-${d} m`;
+          document.body.appendChild(div);
 
-          // Crea un oggetto CSS2D per l'etichetta
-          const label = new THREE.CSS2DObject(div);
-          label.position.copy(pos);
-          label.renderOrder = 10; // Imposta un renderOrder basso per le etichette
-          labelScene.add(label);
-          labels.push(label);
+          // Salva il punto 3D e l'elemento DOM per l'aggiornamento
+          labels.push({
+            el: div,
+            pos: pos.clone()
+          });
         }
 
         // Crea un'etichetta anche per lo 0 (livello del mare)
@@ -374,36 +373,51 @@ try {
           const div = document.createElement('div');
           div.className = 'label2d';
           div.textContent = `0 m`;
+          document.body.appendChild(div);
 
-          // Crea un oggetto CSS2D per l'etichetta
-          const label = new THREE.CSS2DObject(div);
-          label.position.copy(pos);
-          label.renderOrder = 10; // Imposta un renderOrder basso per le etichette
-          labelScene.add(label);
-          labels.push(label);
+          // Salva il punto 3D e l'elemento DOM per l'aggiornamento
+          labels.push({
+            el: div,
+            pos: pos.clone()
+          });
         }
 
-        // Imposta il renderOrder per il parallelepipedo
-        threeScene.traverse(function(object) {
-          if (object.isLine) { // Questo è il nostro parallelepipedo
-            object.renderOrder = 50; // RenderOrder intermedio
+        // Funzione per aggiornare la posizione delle etichette
+        function updateLabels() {
+          // Calcola la matrice di proiezione della telecamera
+          const cameraPosition = camera.position.clone();
+          const cameraQuaternion = camera.quaternion.clone();
+
+          // Per ogni etichetta, calcola la posizione 2D dello schermo
+          for (const label of labels) {
+            const labelPos = label.pos;
+            const vector = labelPos.clone();
+            const widthHalf = container.clientWidth / 2;
+            const heightHalf = container.clientHeight / 2;
+
+            // Proietta la posizione 3D nello spazio 2D dello schermo
+            vector.project(camera);
+
+            // Converte le coordinate NDC (Normalized Device Coordinates) a coordinate schermo
+            vector.x = (vector.x * widthHalf) + widthHalf;
+            vector.y = -(vector.y * heightHalf) + heightHalf;
+
+            // Se la posizione è dietro la telecamera, nascondi l'etichetta
+            if (vector.z < -1 || vector.z > 1) {
+              label.el.style.display = 'none';
+            } else {
+              // Altrimenti, posiziona l'etichetta e rendila visibile
+              label.el.style.display = '';
+              label.el.style.left = vector.x + 'px';
+              label.el.style.top = vector.y + 'px';
+            }
           }
-        });
 
-        // Aggiungi un gestore per il ridimensionamento della finestra
-        window.addEventListener('resize', function() {
-          labelRenderer.setSize(container.clientWidth, container.clientHeight);
-        });
+          requestAnimationFrame(updateLabels);
+        }
 
-        // Modifica il loop di rendering per includere le etichette CSS2D
-        const originalRender = renderer.render;
-        renderer.render = function(scene, camera) {
-          // Rendering della scena principale
-          originalRender.call(renderer, scene, camera);
-
-          // Rendering delle etichette
-          labelRenderer.render(labelScene, camera);
-        };
+        // Avvia l'aggiornamento delle etichette
+        updateLabels();
 
         console.log('Parallelepipedo e etichette aggiunti con successo.');
 
