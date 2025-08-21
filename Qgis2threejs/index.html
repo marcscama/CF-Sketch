@@ -124,95 +124,54 @@ var container = document.getElementById("view"),
 
 app.init(container);       // initialize viewer
 
-// load the scene
-app.loadSceneFile("./data/index/scene.js", function (scene) {
-  // scene file has been loaded
-  app.start();
-}, function (scene) {
-  // all relevant files have been loaded
 
-});
-</script>
-
-<!-- INCOLLA QUESTO BLOCCO DOPO IL TAG </script> DELLA TUA CALL app.loadSceneFile(...) -->
+<!-- Sostituisci qui la chiamata app.loadSceneFile con il seguente blocco -->
 <script>
-(function(){
-  // crea lo stile delle etichette via JS (evita tag <style> inseriti accidentalmente dentro uno <script>)
-  if (!document.getElementById('label2d-style')) {
-    const s = document.createElement('style');
-    s.id = 'label2d-style';
-    s.textContent = `
-    .label2d {
-      padding:2px 6px;
-      background:rgba(255,255,255,0.95);
-      border:1px solid #000;
-      color:#000;
-      font-weight:700;
-      font-size:12px;
-      border-radius:3px;
-      white-space:nowrap;
-      pointer-events:none;
-      position:absolute;
-      transform:translate(-50%,-50%);
-      will-change:transform;
-    }`;
-    document.head.appendChild(s);
-  }
-
-  // polling sicuro: aspetta che app e la scena siano pronti (usiamo app.start callback se disponibile)
-  function onceSceneReady(callback, timeout = 15000) {
-    const start = Date.now();
-    (function tick(){
-      // preferiamo app.scene/app.camera/app.renderer se disponibili (Qgis2threejs)
-      const scene = (window.app && app.scene) || window.scene;
-      const camera = (window.app && app.camera) || window.camera || (window.viewer && viewer.camera);
-      const renderer = (window.app && app.renderer) || window.renderer || (window.viewer && viewer.renderer);
-      if (window.THREE && scene && camera && renderer) {
-        return callback({THREE, scene, camera, renderer});
-      }
-      if (Date.now() - start > timeout) {
-        console.error('Timeout: scene/camera/renderer non trovati.');
+app.loadSceneFile("./data/index/scene.js",
+  function(scene) {
+    // scena caricata: avvia viewer
+    app.start();
+  },
+  function(scene) {
+    // tutti i file caricati -> qui la scena è pronta: costruiamo il parallelepipedo semplice
+    try {
+      const THREE = window.THREE;
+      const camera = (app && app.camera) || window.camera || (window.viewer && viewer.camera);
+      const renderer = (app && app.renderer) || window.renderer || (window.viewer && viewer.renderer);
+      if (!THREE || !scene || !camera || !renderer) {
+        console.warn('Ambiente di rendering non disponibile.');
         return;
       }
-      requestAnimationFrame(tick);
-    })();
-  }
 
-  // funzione principale che aggiunge parallelepipedo e etichette
-  function addParallelepiped({THREE, scene, camera, renderer}) {
-    try {
-      const DEPTH = 10000;
-      const LABEL_STEP = 1000;
-      const LABEL_OFFSET_PX = 30;
-
-      // trova DTM (byName / contains 'dtm' / fallback largest mesh)
-      function findDTM(scene) {
-        if (scene.getObjectByName) {
-          const byName = scene.getObjectByName('DTM');
-          if (byName) return byName;
-        }
-        let found = null;
-        scene.traverse(o => {
-          if (!found && o.isMesh && o.name && typeof o.name === 'string' && o.name.toLowerCase().includes('dtm')) found = o;
-        });
-        if (found) return found;
-        let maxArea = -Infinity, best = null;
-        scene.traverse(o => {
-          if (o.isMesh) {
-            const bb = new THREE.Box3().setFromObject(o);
-            const s = new THREE.Vector3(); bb.getSize(s);
-            const arr = [s.x,s.y,s.z].sort((a,b)=>b-a);
-            const area = arr[0]*arr[1];
-            if (area > maxArea) { maxArea = area; best = o; }
-          }
-        });
-        return best;
+      // stile etichette (se non già presente)
+      if (!document.getElementById('label2d-style')) {
+        const s = document.createElement('style');
+        s.id = 'label2d-style';
+        s.textContent = `
+        .label2d {
+          padding:2px 6px;
+          background:rgba(255,255,255,0.95);
+          border:1px solid #000;
+          color:#000;
+          font-weight:700;
+          font-size:12px;
+          border-radius:3px;
+          white-space:nowrap;
+          pointer-events:none;
+          position:absolute;
+          transform:translate(-50%,-50%);
+        }`;
+        document.head.appendChild(s);
       }
 
-      const dtm = findDTM(scene);
-      if (!dtm) { console.warn('DTM non trovato nella scena.'); return; }
+      // trova DTM (assunto presente e chiamato esattamente 'DTM')
+      const dtm = scene.getObjectByName('DTM');
+      if (!dtm) {
+        console.warn('DTM non trovato nella scena (nome esatto "DTM").');
+        return;
+      }
 
-      // assicurati DTM sempre visibile
+      // rendi DTM sempre visibile (semi-trasparente) per evitare che scompaia
       dtm.traverse(n => {
         if (n.isMesh) {
           const mats = Array.isArray(n.material) ? n.material : [n.material];
@@ -229,63 +188,72 @@ app.loadSceneFile("./data/index/scene.js", function (scene) {
         }
       });
 
-      // bbox del DTM
+      // parametri parallelepipedo
+      const DEPTH = 10000;   // scende di 10000 m
+      const STEP = 1000;     // etichette ogni 1000 m
+      const OFFSET_PX = 30;  // offset etichette (scalato sotto)
+
+      // bounding box del DTM
       const bb = new THREE.Box3().setFromObject(dtm);
 
-      // determina asse verticale (min dimensione del bbox scene)
+      // determina asse verticale: dimensione minore del bbox totale della scena
       const totalBbox = new THREE.Box3().setFromObject(scene);
       const totalSize = new THREE.Vector3(); totalBbox.getSize(totalSize);
-      let vertIndex = 1;
+      let vertIndex = 1; // default Y
       if (totalSize.x <= totalSize.y && totalSize.x <= totalSize.z) vertIndex = 0;
       else if (totalSize.z <= totalSize.x && totalSize.z <= totalSize.y) vertIndex = 2;
-      const axes2 = [0,1,2].filter(i=>i!==vertIndex);
+      const axes2 = [0,1,2].filter(i => i !== vertIndex);
 
-      // punto 2D basso-destra = (max su axes2[0], min su axes2[1])
+      // punto 2D "basso a destra" = (max su axes2[0], min su axes2[1])
       const maxA = bb.max.getComponent(axes2[0]);
       const minB = bb.min.getComponent(axes2[1]);
 
-      // superficie Z (top) -> bb.max sul vertIndex
+      // quota superficie: top = bb.max sul vertIndex
       const topZ = bb.max.getComponent(vertIndex);
       const bottomZ = topZ - DEPTH;
 
-      // top corners (0=basso-destra,1=alto-destra,2=alto-sin,3=basso-sin)
-      const topCorners = [];
-      topCorners.push(new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ));
-      topCorners.push(new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], bb.max.getComponent(axes2[1])).setComponent(vertIndex, topZ));
-      topCorners.push(new THREE.Vector3().setComponent(axes2[0], bb.min.getComponent(axes2[0])).setComponent(axes2[1], bb.max.getComponent(axes2[1])).setComponent(vertIndex, topZ));
-      topCorners.push(new THREE.Vector3().setComponent(axes2[0], bb.min.getComponent(axes2[0])).setComponent(axes2[1], minB).setComponent(vertIndex, topZ));
+      // costruisci top corners (0=basso-destra,1=alto-destra,2=alto-sin,3=basso-sin)
+      const topCorners = [
+        new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ),
+        new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], bb.max.getComponent(axes2[1])).setComponent(vertIndex, topZ),
+        new THREE.Vector3().setComponent(axes2[0], bb.min.getComponent(axes2[0])).setComponent(axes2[1], bb.max.getComponent(axes2[1])).setComponent(vertIndex, topZ),
+        new THREE.Vector3().setComponent(axes2[0], bb.min.getComponent(axes2[0])).setComponent(axes2[1], minB).setComponent(vertIndex, topZ)
+      ];
       const bottomCorners = topCorners.map(c => c.clone().setComponent(vertIndex, bottomZ));
 
-      // disegna contorni: top rect, bottom rect, verticali
+      // funzione helper per aggiungere linea
       const matLine = new THREE.LineBasicMaterial({ color: 0x000000 });
-      function addLine(p1,p2) {
+      function addLine(p1, p2) {
         const geom = new THREE.BufferGeometry().setFromPoints([p1.clone(), p2.clone()]);
         const l = new THREE.Line(geom, matLine);
         scene.add(l);
         return l;
       }
+
+      // disegna contorni (top rect, bottom rect, 4 verticali)
       addLine(topCorners[0], topCorners[1]); addLine(topCorners[1], topCorners[2]);
       addLine(topCorners[2], topCorners[3]); addLine(topCorners[3], topCorners[0]);
       addLine(bottomCorners[0], bottomCorners[1]); addLine(bottomCorners[1], bottomCorners[2]);
       addLine(bottomCorners[2], bottomCorners[3]); addLine(bottomCorners[3], bottomCorners[0]);
       for (let i=0;i<4;i++) addLine(topCorners[i], bottomCorners[i]);
 
-      // etichette solo sulla colonna in basso-destra (topCorners[0]->bottomCorners[0])
+      // etichette solo sulla colonna basso-destra (topCorners[0] -> bottomCorners[0])
       const labels = [];
       const cornerTop = topCorners[0].clone();
-      // outward direction (footprint)
+
+      // direzione outward per mettere le etichette leggermente fuori
       const centerFoot = new THREE.Vector3();
-      centerFoot.setComponent(axes2[0], (bb.max.getComponent(axes2[0]) + bb.min.getComponent(axes2[0]))/2);
-      centerFoot.setComponent(axes2[1], (bb.max.getComponent(axes2[1]) + bb.min.getComponent(axes2[1]))/2);
+      centerFoot.setComponent(axes2[0], (bb.max.getComponent(axes2[0]) + bb.min.getComponent(axes2[0]))/2 );
+      centerFoot.setComponent(axes2[1], (bb.max.getComponent(axes2[1]) + bb.min.getComponent(axes2[1]))/2 );
       centerFoot.setComponent(vertIndex, 0);
       const dirOut = cornerTop.clone().setComponent(vertIndex,0).sub(centerFoot.clone().setComponent(vertIndex,0));
       if (dirOut.lengthSq() < 1e-6) { dirOut.setComponent(axes2[0],1); dirOut.setComponent(axes2[1],0); }
       dirOut.setComponent(vertIndex,0); dirOut.normalize();
 
       const footprintSize = Math.max(bb.getSize(new THREE.Vector3()).x, bb.getSize(new THREE.Vector3()).y);
-      const labelOffset = LABEL_OFFSET_PX * 0.01 * footprintSize;
+      const labelOffset = OFFSET_PX * 0.01 * footprintSize;
 
-      for (let d=LABEL_STEP; d<=DEPTH; d+=LABEL_STEP) {
+      for (let d = STEP; d <= DEPTH; d += STEP) {
         const z = topZ - d;
         const pos = cornerTop.clone().setComponent(vertIndex, z);
         const posOut = pos.clone().add(dirOut.clone().multiplyScalar(labelOffset));
@@ -296,9 +264,9 @@ app.loadSceneFile("./data/index/scene.js", function (scene) {
         labels.push({el: div, pos: posOut.clone()});
       }
 
-      // update loop per etichette (si proiettano usando camera del viewer)
-      (function updateLoop(){
-        requestAnimationFrame(updateLoop);
+      // loop per proiettare le etichette (non interferisce con Qgis2threejs render)
+      (function updateLabels(){
+        requestAnimationFrame(updateLabels);
         try {
           for (const L of labels) {
             const p = L.pos.clone().project(camera);
@@ -309,44 +277,23 @@ app.loadSceneFile("./data/index/scene.js", function (scene) {
             L.el.style.left = Math.round(sx) + 'px';
             L.el.style.top  = Math.round(sy) + 'px';
           }
-        } catch(e) { /* ignore during scene changes */ }
+        } catch(e){}
       })();
 
-      console.log('Parallelepipedo aggiunto:', {topZ, bottomZ, cornerXY:[maxA,minB]});
-    } catch(err) {
-      console.error('Errore addParallelepiped:', err);
+      console.log('Parallelepipedo aggiunto — topZ:', topZ, ' bottomZ:', bottomZ, ' cornerXY:', maxA, minB);
+
+    } catch (err) {
+      console.error('Errore nel callback parallelepipedo:', err);
     }
   }
-
-  // Se la pagina ha già chiamato app.loadSceneFile, al termine Qgis2threejs imposta app.scene/app.camera/app.renderer.
-  // Se app.start è già stato chiamato prima che noi eseguissimo questo script, usiamo una chiamata diretta
-  if (window.app && app.scene) {
-    // caso in cui lo script è eseguito dopo il caricamento
-    onceSceneReady(addParallelepiped);
-  } else {
-    // se l'export chiama app.loadSceneFile dopo questo codice, colleghiamo il callback
-    // ATTENZIONE: se hai già una chiamata app.loadSceneFile nel tuo file, non duplicarla.
-    // Per sicurezza proviamo a intercettare app.loadSceneFile esistente: se definita la sovrascriviamo
-    if (window.app && typeof app.loadSceneFile === 'function') {
-      // wrap existing loadSceneFile to call our function when "all files loaded" callback runs.
-      const origLoad = app.loadSceneFile.bind(app);
-      app.loadSceneFile = function(sceneFile, onSceneLoaded, onAllFilesLoaded) {
-        // wrap the onAllFilesLoaded
-        const wrappedAll = function(scene) {
-          try { if (typeof onAllFilesLoaded === 'function') onAllFilesLoaded(scene); } catch(e){ console.error(e); }
-          try { addParallelepiped({THREE: window.THREE, scene: app.scene || scene, camera: app.camera || window.camera, renderer: app.renderer || window.renderer}); } catch(e) { console.error(e); }
-        };
-        return origLoad(sceneFile, onSceneLoaded, wrappedAll);
-      };
-    }
-    // fallback: poll until ready
-    onceSceneReady(addParallelepiped);
-  }
-
-})();
+);
 </script>
-<!-- FINE BLOCCO: incollalo DOPO il </script> della parte Qgis2threejs -->
+<!-- fine sostituzione -->
+
+
+
 
   
+</script>
 </body>
 </html>
