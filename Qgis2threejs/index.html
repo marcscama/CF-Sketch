@@ -1,195 +1,147 @@
 <!DOCTYPE html>
-<html>
+<html lang="it">
 <head>
-<meta charset="UTF-8">
-<title>Terremoti nei Campi Flegrei dal 2005 al 07-2025, con MD>=2</title>
-<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-<base target="_blank">
-<link rel="stylesheet" type="text/css" href="./Qgis2threejs.css">
-<style type="text/css">
-#popup, #header, #layerpanel { left: 36px; }
-.label2d { padding:2px 6px; background:rgba(255,255,255,0.95); border:1px solid #000; color:#000; font-weight:700; font-size:12px; border-radius:3px; white-space:nowrap; pointer-events:none; position:absolute; transform:translate(-50%,-50%); }
-/* UI panel moved to RIGHT (kept Qgis2threejs UI intact) */
-#drawUI { position: absolute; top: 12px; right: 12px; left: auto; background: rgba(255,255,255,0.95); border-radius: 8px; padding: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); z-index: 2000; font-family: sans-serif; }
-#drawUI h3 { margin:4px 0 8px 0; font-size:14px }
-.ui-row { display:flex; align-items:center; gap:8px; margin:6px 0 }
-button.tool { padding:6px 8px; border-radius:6px; border:1px solid #888; background:#f5f5f5; cursor:pointer }
-button.tool.active { background:#0a84ff; color:#fff; border-color:#066fd6 }
-input[type=color] { width:34px; height:28px; padding:0; border:none; }
-input[type=range] { width:110px }
-#pointer { position:fixed; pointer-events:none; z-index:3000; width:24px; height:24px; border-radius:50%; transform:translate(-50%,-50%); border:2px solid rgba(0,0,0,0.6); background: rgba(255,255,255,0.3) }
-#pointer.eraser { background: rgba(255,255,255,0.1); border:2px dashed rgba(0,0,0,0.6) }
-</style>
-
-<!-- Core three + Qgis2threejs (non-module) -->
-<script src="./threejs/three.min.js"></script>
-<script src="./threejs/OrbitControls.js"></script>
-<script src="./threejs/ViewHelper.js"></script>
-<script src="./threejs/OutlineEffect.js"></script>
-<script src="./Qgis2threejs.js"></script>
-
-<!-- IMPORTANT: include Line2 NON-MODULE builds (these attach to global THREE). -->
-<!-- Place these lines BEFORE your drawing script. You can also copy these files locally under ./threejs/lines/ -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.165.0/examples/js/lines/LineGeometry.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.165.0/examples/js/lines/LineMaterial.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.165.0/examples/js/lines/Line2.js"></script>
-
+  <meta charset="UTF-8">
+  <title>Terremoti Pen Eraser</title>
+  <style>
+    body { margin:0; overflow:hidden; font-family:sans-serif; }
+    #ui-panel {
+      position:absolute;
+      top:10px;
+      right:10px;
+      background:rgba(255,255,255,0.9);
+      padding:10px;
+      border-radius:8px;
+      box-shadow:0 0 5px rgba(0,0,0,0.3);
+      font-size:14px;
+    }
+    canvas { display:block; }
+  </style>
 </head>
 <body>
-<div id="view"><div id="northarrow"></div><div id="navigation"></div></div>
-
-<!-- Full Qgis2threejs popup UI preserved -->
-<div id="popup">... (omitted here for brevity in editor) ...</div>
-
-<!-- DRAW/ERASE UI -->
-<div id="drawUI">
-  <h3>Annota</h3>
-  <div class="ui-row">
-    <button id="penBtn" class="tool">✏️ Pen</button>
-    <button id="eraserBtn" class="tool">🧽 Eraser</button>
-    <button id="clearBtn" class="tool">🗑 Clear</button>
+  <div id="ui-panel">
+    <button id="penBtn">✏️ Penna</button>
+    <button id="eraserBtn">🩹 Gomma</button>
   </div>
-  <div class="ui-row"><label>Color</label><input id="colorPicker" type="color" value="#ff0000"></div>
-  <div class="ui-row"><label>Thickness</label><input id="thickness" type="range" min="1" max="20" value="4"><span id="thicknessVal">4</span></div>
-  <div class="ui-row"><label>Eraser size</label><input id="eraserSize" type="range" min="8" max="80" value="32"><span id="eraserVal">32</span></div>
-  <div style="font-size:12px; margin-top:6px; color:#333">Hold left mouse to draw/erase. Pen & Eraser disable rotation; pan & zoom remain available.</div>
-</div>
-<div id="pointer"></div>
 
-<script>
-// ---- Config iniziale ----
-Q3D.Config.allVisible = true; Q3D.Config.bgColor = 0xffffff; Q3D.Config.localMode = true;
-var container = document.getElementById("view"), app = Q3D.application, gui = Q3D.gui;
-try { app.init(container); } catch(e){ console.warn('app.init failed', e); }
+  <!-- Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.min.js"></script>
 
-// sanity check: Line2 must be available (we required the non-module scripts in HEAD)
-if (!(THREE && THREE.Line2 && THREE.LineGeometry && THREE.LineMaterial)) {
-  console.error('Line2 not found. Make sure you included the 3 scripts from three/examples/js/lines/ BEFORE this script (LineGeometry.js, LineMaterial.js, Line2.js). Drawing will be disabled.');
-}
+  <!-- Line2 dal repo locale -->
+  <script src="./lines/LineGeometry.js"></script>
+  <script src="./lines/LineMaterial.js"></script>
+  <script src="./lines/Line2.js"></script>
 
-app.loadSceneFile('./data/index/scene.js', function(scene){ try { app.start(); } catch(e){ console.warn('app.start', e); } }, function(scene){
-  try {
-    const THREE = window.THREE;
-    const threeScene = (scene && scene.isScene) ? scene : (app && app.scene) || window.scene;
-    const camera = (app && app.camera) || window.camera || (window.viewer && viewer.camera);
-    const renderer = (app && app.renderer) || window.renderer || (window.viewer && viewer.renderer);
-    if (!THREE || !threeScene || !camera || !renderer) { console.error('Missing rendering context'); return; }
+  <!-- Qgis2threejs e librerie esistenti -->
+  <script src="Qgis2threejs.js"></script>
+  <script src="dat-gui.min.js"></script>
+  <script src="threejs-utility.js"></script>
 
-    // --- Find DTM and bounding box (used to clamp drawing inside parallelepiped) ---
-    let dtm = null; threeScene.traverse(o=>{ if (o.userData && o.userData.layerId===2) dtm = o; });
-    const bbox = new THREE.Box3().setFromObject(dtm || threeScene);
+  <script type="module">
+    import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/controls/OrbitControls.js";
 
-    // --- draw parallelepiped & labels (kept from original) ---
-    // ... same as before - omitted in this snippet for brevity; assume labels[] and updateLabels() are implemented ...
+    let scene = new THREE.Scene();
+    let camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 10000);
+    camera.position.set(0,0,1500);
 
-    // ---- DRAW & ERASE: enforce Line2 usage and clamp to bbox ----
-    const penBtn = document.getElementById('penBtn'), eraserBtn = document.getElementById('eraserBtn'), clearBtn = document.getElementById('clearBtn');
-    const colorPicker = document.getElementById('colorPicker'), thicknessInput = document.getElementById('thickness'), thicknessVal = document.getElementById('thicknessVal');
-    const eraserSizeInput = document.getElementById('eraserSize'), eraserVal = document.getElementById('eraserVal');
-    const pointer = document.getElementById('pointer');
+    let renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
 
-    let mode = null, drawing=false, currentLine=null, lines = [], nextId=1, highlighted=null; let drawPlane = null;
+    let controls = new OrbitControls(camera, renderer.domElement);
 
-    // Controls
-    let controls = (app && app.controls) || (window.controls) || null;
-    if (!controls) { try { controls = new THREE.OrbitControls(camera, renderer.domElement); window.controls = controls; } catch(e){ console.warn('No controls', e); } }
+    // Luce
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(1,1,1).normalize();
+    scene.add(light);
 
-    function setMode(m){ mode=m; penBtn.classList.toggle('active', m==='pen'); eraserBtn.classList.toggle('active', m==='eraser');
-      if (controls) { if (m==='pen' || m==='eraser'){ controls.enableRotate=false; controls.enablePan=true; controls.enableZoom=true; } else controls.enableRotate=true; }
-      // compute draw plane to lie inside bbox: cast camera ray and intersect bbox
-      if (m==='pen'){
-        const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
-        const ray = new THREE.Ray(camera.position.clone(), dir.clone());
-        const hit = ray.intersectBox(bbox, new THREE.Vector3());
-        const pointOnPlane = hit ? hit : bbox.getCenter(new THREE.Vector3());
-        drawPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(dir.clone().negate(), pointOnPlane);
-      } else drawPlane = null;
+    // Parallelepipedo di riferimento
+    const boxGeom = new THREE.BoxGeometry(1000,1000,1000);
+    const boxMat = new THREE.MeshBasicMaterial({color:0xcccccc, wireframe:true});
+    const cube = new THREE.Mesh(boxGeom, boxMat);
+    scene.add(cube);
 
-      updatePointer();
-    }
+    // Etichette assi
+    const createLabel = (text, pos) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.font = '40px Arial';
+      ctx.fillStyle = 'black';
+      ctx.fillText(text, 10, 50);
+      const texture = new THREE.CanvasTexture(canvas);
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map:texture}));
+      sprite.scale.set(200,100,1);
+      sprite.position.copy(pos);
+      return sprite;
+    };
+    scene.add(createLabel('N', new THREE.Vector3(0,600,0)));
+    scene.add(createLabel('S', new THREE.Vector3(0,-600,0)));
+    scene.add(createLabel('E', new THREE.Vector3(600,0,0)));
+    scene.add(createLabel('O', new THREE.Vector3(-600,0,0)));
 
-    penBtn.addEventListener('click', ()=> setMode(mode==='pen'? null : 'pen'));
-    eraserBtn.addEventListener('click', ()=> setMode(mode==='eraser'? null : 'eraser'));
-    clearBtn.addEventListener('click', ()=>{ for (const L of lines) threeScene.remove(L.object3d); lines.length=0; highlighted=null; });
-    thicknessInput.addEventListener('input', ()=>{ thicknessVal.textContent = thicknessInput.value; updatePointer(); });
-    eraserSizeInput.addEventListener('input', ()=>{ eraserVal.textContent = eraserSizeInput.value; updatePointer(); });
+    // Linee disegnate
+    let drawing = false;
+    let currentLineGeom, currentLine, positions = [];
+    let drawingMode = null; // "pen" o "eraser"
 
-    function updatePointer(){ const sz = mode==='eraser'? parseInt(eraserSizeInput.value,10) : parseInt(thicknessInput.value,10); pointer.style.width=Math.max(8,sz)+'px'; pointer.style.height=Math.max(8,sz)+'px'; pointer.classList.toggle('eraser', mode==='eraser'); }
-    updatePointer();
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
 
-    // create Line2-based object (we now REQUIRE Line2 to be present)
-    function makeLineObject(points, color, thickness){
-      if (!(THREE.Line2 && THREE.LineGeometry && THREE.LineMaterial)) throw new Error('Line2 not available - include the three/examples/js/lines scripts before this script');
-      const positions = [];
-      for (const p of points) positions.push(p.x,p.y,p.z);
-      const geom = new THREE.LineGeometry(); geom.setPositions(positions);
-      const mat = new THREE.LineMaterial({ color: new THREE.Color(color).getHex(), linewidth: Math.max(0.0006, thickness/100), resolution: new THREE.Vector2(renderer.domElement.clientWidth, renderer.domElement.clientHeight) });
-      mat.resolution = new THREE.Vector2(renderer.domElement.clientWidth, renderer.domElement.clientHeight);
-      const line = new THREE.Line2(geom, mat); line.computeLineDistances(); line.scale.set(1,1,1);
-      return { object3d: line, material: mat };
-    }
+    document.getElementById("penBtn").onclick = ()=>{
+      drawingMode = "pen";
+      controls.enableRotate = false;
+    };
+    document.getElementById("eraserBtn").onclick = ()=>{
+      drawingMode = "eraser";
+      controls.enableRotate = false;
+    };
 
-    function addPointToLineObj(lineObj, points){
-      const positions = [];
-      for (const p of points) positions.push(p.x,p.y,p.z);
-      lineObj.object3d.geometry.setPositions(positions);
-      lineObj.material.resolution.set(renderer.domElement.clientWidth, renderer.domElement.clientHeight);
-      lineObj.object3d.computeLineDistances();
-      lineObj.object3d.geometry.needsUpdate = true;
-    }
-
-    function toScreenPosition(v3){ const v=v3.clone().project(camera); return { x:(v.x+1)*0.5*renderer.domElement.clientWidth, y:(1-v.y)*0.5*renderer.domElement.clientHeight, z:v.z }; }
-
-    function findNearestLineSegment(mouseX, mouseY, radiusPx){ let best=null, bestDist=Infinity; for (const L of lines){ const pts=L.points; for (let i=0;i<pts.length-1;i++){ const a=toScreenPosition(pts[i]); const b=toScreenPosition(pts[i+1]); const dx=b.x-a.x, dy=b.y-a.y, l2=dx*dx+dy*dy; let t=0; if (l2>1e-6) t=((mouseX-a.x)*dx + (mouseY-a.y)*dy)/l2; t=Math.max(0,Math.min(1,t)); const px=a.x+t*dx, py=a.y+t*dy; const dist=Math.hypot(mouseX-px, mouseY-py); if (dist<bestDist){ bestDist=dist; const cp=new THREE.Vector3().lerpVectors(pts[i], pts[i+1], t); best={line:L, segIndex:i, segT:t, closestPoint:cp, dist}; } } } if (best && best.dist<=radiusPx) return best; return null; }
-
-    function setHighlight(L){ if (highlighted===L) return; if (highlighted){ try{ highlighted.object3d.material.color.set(highlighted.color); highlighted.object3d.material.linewidth = Math.max(0.0006, highlighted.thickness/100); highlighted.highlighted=false; }catch(e){} } highlighted=L; if (highlighted){ try{ highlighted.object3d.material.color.set(0xFFFF00); highlighted.object3d.material.linewidth = Math.max(0.001, highlighted.thickness/80); highlighted.highlighted=true;}catch(e){} } }
-
-    // erase piecewise inside screen radius: remove points within radius and rebuild chunks
-    function erasePieceAt(mouseX, mouseY, radiusPx){ const found = findNearestLineSegment(mouseX, mouseY, radiusPx); if (!found) return false; const L = found.line; const pts=L.points; const keep=pts.map(p=>{ const s=toScreenPosition(p); return Math.hypot(mouseX-s.x, mouseY-s.y) > radiusPx; });
-      // build chunks
-      const chunks=[]; let cur=null; for (let i=0;i<keep.length;i++){ if (keep[i]){ if(!cur) cur=[]; cur.push(pts[i].clone()); } else { if (cur && cur.length>=2) chunks.push(cur); cur=null; } } if (cur && cur.length>=2) chunks.push(cur);
-      threeScene.remove(L.object3d); const idx=lines.indexOf(L); if (idx>=0) lines.splice(idx,1);
-      for (const c of chunks){ const obj=makeLineObject(c, L.color, L.thickness); const newLine={ id: nextId++, object3d: obj.object3d, material: obj.material, points: c, color: L.color, thickness: L.thickness, opacity:1.0 }; threeScene.add(newLine.object3d); lines.push(newLine); }
-      return true;
-    }
-
-    // events
-    const domEl = renderer.domElement; let mouse={x:0,y:0};
-    domEl.addEventListener('pointermove', onPointerMove); domEl.addEventListener('pointerdown', onPointerDown); domEl.addEventListener('pointerup', onPointerUp);
-
-    function getRay(clientX, clientY){ const rect=domEl.getBoundingClientRect(); const ndcX=((clientX-rect.left)/domEl.clientWidth)*2-1; const ndcY=-(((clientY-rect.top)/domEl.clientHeight)*2-1); const rc=new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera); return rc; }
-
-    function onPointerMove(ev){ const rect=domEl.getBoundingClientRect(); mouse.x = ev.clientX - rect.left; mouse.y = ev.clientY - rect.top; pointer.style.left = ev.clientX + 'px'; pointer.style.top = ev.clientY + 'px';
-      if (mode==='eraser'){ const seg=findNearestLineSegment(mouse.x, mouse.y, parseInt(eraserSizeInput.value,10)); setHighlight(seg? seg.line : null); }
-      if (drawing && mode==='pen' && currentLine){ // recompute drawPlane inside bbox
-        const dir=new THREE.Vector3(); camera.getWorldDirection(dir); const ray=new THREE.Ray(camera.position.clone(), dir.clone()); const hit=ray.intersectBox(bbox, new THREE.Vector3()); const pointOnPlane = hit? hit : bbox.getCenter(new THREE.Vector3()); drawPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(dir.clone().negate(), pointOnPlane);
-        const rc = getRay(ev.clientX, ev.clientY); const pt=new THREE.Vector3(); rc.ray.intersectPlane(drawPlane, pt);
-        if (pt){ // clamp inside bbox so lines stay inside parallelepiped
-          bbox.clampPoint(pt, pt);
-          const last = currentLine.points[currentLine.points.length-1]; if (!last || last.distanceTo(pt) > 0.01){ currentLine.points.push(pt.clone()); addPointToLineObj(currentLine, currentLine.points); }
+    renderer.domElement.addEventListener('mousedown', (e)=>{
+      if(drawingMode==="pen"){
+        drawing = true;
+        positions = [];
+        currentLineGeom = new THREE.LineGeometry();
+        let mat = new THREE.LineMaterial({color:0x0000ff, linewidth:5});
+        currentLine = new THREE.Line2(currentLineGeom, mat);
+        scene.add(currentLine);
+      } else if(drawingMode==="eraser"){
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        let intersects = raycaster.intersectObjects(scene.children, true);
+        for(let inter of intersects){
+          if(inter.object.isLine2){
+            scene.remove(inter.object);
+            break;
+          }
         }
       }
-      if (drawing && mode==='eraser') erasePieceAt(mouse.x, mouse.y, parseInt(eraserSizeInput.value,10));
+    });
+
+    renderer.domElement.addEventListener('mousemove', (e)=>{
+      if(drawing && drawingMode==="pen"){
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        let planeZ = new THREE.Plane(new THREE.Vector3(0,0,1),0);
+        let pt = new THREE.Vector3();
+        raycaster.ray.intersectPlane(planeZ, pt);
+        positions.push(pt.x, pt.y, pt.z);
+        currentLineGeom.setPositions(positions);
+      }
+    });
+
+    renderer.domElement.addEventListener('mouseup', ()=>{
+      drawing = false;
+    });
+
+    function animate(){
+      requestAnimationFrame(animate);
+      renderer.render(scene,camera);
     }
+    animate();
 
-    function onPointerDown(ev){ if (ev.button !== 0) return; if (mode==='pen'){ drawing=true; currentLine={ id: nextId++, points: [], color: colorPicker.value, thickness: parseInt(thicknessInput.value,10) };
-        // define plane inside bbox using ray-box intersection
-        const dir=new THREE.Vector3(); camera.getWorldDirection(dir); const ray=new THREE.Ray(camera.position.clone(), dir.clone()); const hit=ray.intersectBox(bbox, new THREE.Vector3()); const pointOnPlane = hit? hit : bbox.getCenter(new THREE.Vector3()); drawPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(dir.clone().negate(), pointOnPlane);
-        const rc = getRay(ev.clientX, ev.clientY); const pt=new THREE.Vector3(); rc.ray.intersectPlane(drawPlane, pt); if (pt){ bbox.clampPoint(pt, pt); currentLine.points.push(pt.clone()); }
-        const obj = makeLineObject(currentLine.points, currentLine.color, currentLine.thickness); currentLine.object3d = obj.object3d; currentLine.material = obj.material; currentLine.color = currentLine.color; currentLine.opacity = currentLine.object3d.material.opacity || 1.0; threeScene.add(currentLine.object3d); lines.push(currentLine);
-      } else if (mode==='eraser'){
-        const rect=domEl.getBoundingClientRect(); const mx=ev.clientX-rect.left, my=ev.clientY-rect.top; const done=erasePieceAt(mx,my, parseInt(eraserSizeInput.value,10)); if (done) setHighlight(null); drawing=true; }
-    }
-
-    function onPointerUp(ev){ if (ev.button !==0) return; drawing=false; currentLine=null; }
-
-    window.addEventListener('resize', ()=>{ for (const L of lines) if (L.object3d && L.object3d.material && L.object3d.material.resolution) L.object3d.material.resolution.set(renderer.domElement.clientWidth, renderer.domElement.clientHeight); });
-
-    setMode(null);
-    console.log('Pen & Eraser ready (Line2 enforced). Drawing plane locked to camera and clamped to bounding box.');
-
-  } catch(err){ console.error('scene callback error', err); }
-});
-</script>
+    console.log('Line2:', THREE.Line2);
+  </script>
 </body>
 </html>
