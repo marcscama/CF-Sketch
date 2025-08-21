@@ -345,81 +345,149 @@ try {
         dirOut.setComponent(vertIndex, 0);
         dirOut.normalize();
 
-        // Array per memorizzare le etichette
-        const labels = [];
+        // ----------------------------
+        // SOSTITUZIONE ETICHETTE: SPRITE 3D (THREE.Sprite)
+        // ----------------------------
 
-        // Crea le etichette ogni -1000m lungo la colonna verticale
+        // Array per memorizzare gli sprite etichetta
+        const labelSprites = [];
+
+        // funzione di utilità per disegnare un testo su canvas e creare uno sprite
+        function createTextSprite(text) {
+          // testo e dimensioni di base (regola se vuoi font più piccolo)
+          const fontSize = 48; // px su canvas (adatta poi lo scale 3D)
+          const padding = 12;
+          const ratio = window.devicePixelRatio || 1;
+
+          // canvas temporaneo per misurazione
+          const measureCanvas = document.createElement('canvas');
+          const mctx = measureCanvas.getContext('2d');
+          mctx.font = `${fontSize}px Arial`;
+          const metrics = mctx.measureText(text);
+          const w = Math.ceil(metrics.width) + padding * 2;
+          const h = Math.ceil(fontSize) + padding * 2;
+
+          // canvas reale con DPR per nitidezza
+          const canvas = document.createElement('canvas');
+          canvas.width = w * ratio;
+          canvas.height = h * ratio;
+          canvas.style.width = `${w}px`;
+          canvas.style.height = `${h}px`;
+          const ctx = canvas.getContext('2d');
+          ctx.scale(ratio, ratio);
+
+          // background arrotondato
+          const radius = 6;
+          ctx.fillStyle = 'rgba(255,255,255,0.95)';
+          ctx.strokeStyle = 'rgba(0,0,0,1)';
+          ctx.lineWidth = 2;
+          // rounded rect
+          ctx.beginPath();
+          ctx.moveTo(radius + padding, padding);
+          ctx.lineTo(w - radius - padding, padding);
+          ctx.quadraticCurveTo(w - padding, padding, w - padding, padding + radius);
+          ctx.lineTo(w - padding, h - radius - padding);
+          ctx.quadraticCurveTo(w - padding, h - padding, w - radius - padding, h - padding);
+          ctx.lineTo(radius + padding, h - padding);
+          ctx.quadraticCurveTo(padding, h - padding, padding, h - radius - padding);
+          ctx.lineTo(padding, padding + radius);
+          ctx.quadraticCurveTo(padding, padding, padding + radius, padding);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          // testo
+          ctx.font = `${fontSize}px Arial`;
+          ctx.fillStyle = '#000';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, padding, h / 2);
+
+          // crea texture e sprite
+          const texture = new THREE.CanvasTexture(canvas);
+          texture.minFilter = THREE.LinearFilter;
+          texture.needsUpdate = true;
+
+          const material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+          });
+
+          // permetti il depthTest così le sfere possono occultare le etichette
+          material.depthTest = true;
+          // non scriviamo nel depth buffer (meglio per trasparenze)
+          material.depthWrite = false;
+
+          const sprite = new THREE.Sprite(material);
+          // centro del sprite al centro della texture
+          sprite.center.set(0.5, 0.5);
+
+          // scala iniziale ragionevole; la adegueremo dinamicamente in update
+          const aspect = (canvas.width / ratio) / (canvas.height / ratio);
+          sprite.scale.set(1 * aspect, 1, 1); // valore base: 1 (poi scala in funzione della distanza)
+
+          return sprite;
+        }
+
+        // Crea gli sprite per le etichette ogni -1000m e per 0 m
         for (let d = 1000; d <= DEPTH; d += STEP) {
-          const z = topZParallelepiped - d; // negativa
+          const z = topZParallelepiped - d; // negativo
           const pos = cornerTop.clone().setComponent(vertIndex, z).add(dirOut.clone().multiplyScalar(LABEL_OFFSET));
 
-          const div = document.createElement('div');
-          div.className = 'label2d';
-          div.textContent = `-${d} m`;
-          document.body.appendChild(div);
-
-          // Salva il punto 3D e l'elemento DOM per l'aggiornamento
-          labels.push({
-            el: div,
-            pos: pos.clone()
-          });
+          const sprite = createTextSprite(`-${d} m`);
+          sprite.position.copy(pos);
+          threeScene.add(sprite);
+          labelSprites.push(sprite);
         }
 
-        // Crea un'etichetta anche per lo 0 (livello del mare)
+        // 0 m
         {
-          const z = topZParallelepiped; // 0 metri
+          const z = topZParallelepiped;
           const pos = cornerTop.clone().setComponent(vertIndex, z).add(dirOut.clone().multiplyScalar(LABEL_OFFSET));
-
-          const div = document.createElement('div');
-          div.className = 'label2d';
-          div.textContent = `0 m`;
-          document.body.appendChild(div);
-
-          // Salva il punto 3D e l'elemento DOM per l'aggiornamento
-          labels.push({
-            el: div,
-            pos: pos.clone()
-          });
+          const sprite = createTextSprite(`0 m`);
+          sprite.position.copy(pos);
+          threeScene.add(sprite);
+          labelSprites.push(sprite);
         }
 
-        // Funzione per aggiornare la posizione delle etichette
-        function updateLabels() {
-          // Calcola la matrice di proiezione della telecamera
-          const cameraPosition = camera.position.clone();
-          const cameraQuaternion = camera.quaternion.clone();
+        // Funzione di aggiornamento: scala gli sprite in funzione della distanza per mantenere leggibilità
+        function updateLabelSprites() {
+          const camPos = camera.position;
+          for (const sp of labelSprites) {
+            // distanza camera -> sprite
+            const dist = camPos.distanceTo(sp.position);
 
-          // Per ogni etichetta, calcola la posizione 2D dello schermo
-          for (const label of labels) {
-            const labelPos = label.pos;
-            const vector = labelPos.clone();
-            const widthHalf = container.clientWidth / 2;
-            const heightHalf = container.clientHeight / 2;
+            // Regola questo fattore per cambiare la dimensione a schermo
+            // (valori più grandi = etichette più grandi)
+            const baseSize = 0.06; // tuning: modifica se necessario
 
-            // Proietta la posizione 3D nello spazio 2D dello schermo
-            vector.project(camera);
+            // manteniamo l'aspetto originale dell'immagine
+            const img = sp.material.map.image;
+            const imgWidth = (img.width / (window.devicePixelRatio || 1));
+            const imgHeight = (img.height / (window.devicePixelRatio || 1));
+            const aspect = imgWidth / imgHeight;
 
-            // Converte le coordinate NDC (Normalized Device Coordinates) a coordinate schermo
-            vector.x = (vector.x * widthHalf) + widthHalf;
-            vector.y = -(vector.y * heightHalf) + heightHalf;
+            // scala proporzionale alla distanza
+            const scaleY = dist * baseSize;
+            const scaleX = scaleY * aspect;
 
-            // Se la posizione è dietro la telecamera, nascondi l'etichetta
-            if (vector.z < -1 || vector.z > 1) {
-              label.el.style.display = 'none';
+            sp.scale.set(scaleX, scaleY, 1);
+
+            // nascondi se fuori frustum (semplice stima con posizione proiettata)
+            const projected = sp.position.clone().project(camera);
+            if (projected.z < -1 || projected.z > 1) {
+              sp.visible = false;
             } else {
-              // Altrimenti, posiziona l'etichetta e rendila visibile
-              label.el.style.display = '';
-              label.el.style.left = vector.x + 'px';
-              label.el.style.top = vector.y + 'px';
+              sp.visible = true;
             }
           }
 
-          requestAnimationFrame(updateLabels);
+          requestAnimationFrame(updateLabelSprites);
         }
 
-        // Avvia l'aggiornamento delle etichette
-        updateLabels();
+        // Avvia l'aggiornamento (loop)
+        updateLabelSprites();
 
-        console.log('Parallelepipedo e etichette aggiunti con successo.');
+        console.log('Parallelepipedo e etichette (sprite 3D) aggiunti con successo.');
 
       } catch (err) {
         console.error('Errore nel callback parallelepipedo:', err);
