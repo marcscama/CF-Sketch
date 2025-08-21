@@ -10,6 +10,19 @@
 #popup, #header, #layerpanel {
   left: 36px;
 }
+.label2d {
+  padding:2px 6px;
+  background:rgba(255,255,255,0.95);
+  border:1px solid #000;
+  color:#000;
+  font-weight:700;
+  font-size:12px;
+  border-radius:3px;
+  white-space:nowrap;
+  pointer-events:none;
+  position:absolute;
+  transform:translate(-50%,-50%);
+}
 </style>
 <script src="./threejs/three.min.js"></script>
 <script src="./threejs/OrbitControls.js"></script>
@@ -97,10 +110,16 @@
   <div id="nextbtn"></div>
 </div>
 <script>
+// Configurazione iniziale
 Q3D.Config.allVisible = true;
 Q3D.Config.bgColor = 0xffffff;
-Q3D.Config.viewpoint = {lookAt:{x:426248.434989865,y:4517666.811603576,z:-1.1839921050606837e-15},pos:{x:432420.6401290015,y:4504911.042410877,z:3937.8688261482375}};
+Q3D.Config.viewpoint = {
+  lookAt: {x: 426248.434989865, y: 4517666.811603576, z: -1.1839921050606837e-15},
+  pos: {x: 432420.6401290015, y: 4504911.042410877, z: 3937.8688261482375}
+};
 Q3D.Config.localMode = true;
+
+// Inizializzazione
 var container = document.getElementById("view"),
     app = Q3D.application,
     gui = Q3D.gui;
@@ -132,191 +151,257 @@ try {
         const threeScene = (scene && scene.isScene) ? scene : (app && app.scene) || window.scene;
         const camera = (app && app.camera) || window.camera || (window.viewer && viewer.camera);
         const renderer = (app && app.renderer) || window.renderer || (window.viewer && viewer.renderer);
+
         console.log('Callback all files loaded - scene, camera, renderer:', !!threeScene, !!camera, !!renderer);
         if (!THREE || !threeScene || !camera || !renderer) {
           console.warn('Ambiente rendering non disponibile nel callback (THREE/scene/camera/renderer).');
           return;
         }
 
-        // Funzione per stampare la gerarchia degli oggetti con indentazione
-        function printObjectHierarchy(obj, indent) {
-          if (!indent) indent = 0;
-          let indentStr = '';
-          for (let i = 0; i < indent; i++) indentStr += '  ';
+        // Cerca il layer DTM
+        let dtm = threeScene.getObjectByName('DTM');
 
-          console.log(indentStr + 'Oggetto:', obj.name || '(senza nome)', obj.type);
-
-          if (obj.children && obj.children.length > 0) {
-            for (let i = 0; i < obj.children.length; i++) {
-              printObjectHierarchy(obj.children[i], indent + 1);
-            }
-          }
-        }
-
-        console.log('Struttura completa della scena:');
-        printObjectHierarchy(threeScene, 0);
-
-        // Funzione per cercare un potenziale DTM basandosi sulle caratteristiche
-        function findPotentialDTM(scene) {
-          let potentialDTMs = [];
-
-          scene.traverse(function(object) {
-            if (object.isMesh) {
-              // Calcola il bounding box dell'oggetto
-              const bbox = new THREE.Box3().setFromObject(object);
-              const size = bbox.getSize(new THREE.Vector3());
-
-              // Cerchiamo oggetti con dimensioni significative (ipotizzando che un DTM abbia dimensioni significative)
-              // Modifica questi valori in base alle tue aspettative per il DTM
-              if (size.x > 100 && size.y > 100 && size.z > 10) {
-                potentialDTMs.push({
-                  object: object,
-                  size: size,
-                  bbox: bbox
-                });
-              }
+        // Se non trovato direttamente, cerca tra tutti gli oggetti
+        if (!dtm) {
+          console.log('Ricerca alternativa del layer DTM...');
+          threeScene.traverse(function(object) {
+            if (object.name && object.name.toLowerCase().includes('dtm')) {
+              dtm = object;
+              console.log('Layer DTM trovato:', object.name);
             }
           });
 
-          // Ordina in base alla dimensione Z (altezza), assumendo che il DTM abbia una certa altezza
-          potentialDTMs.sort((a, b) => b.size.z - a.size.z);
-
-          return potentialDTMs;
+          // Se ancora non trovato, prova a cercare per tipo/struttura
+          if (!dtm) {
+            threeScene.traverse(function(object) {
+              if (object.isMesh && object.geometry) {
+                // Cerchiamo un oggetto grande che potrebbe essere il DTM
+                const bbox = new THREE.Box3().setFromObject(object);
+                const size = bbox.getSize(new THREE.Vector3());
+                if (size.x > 1000 && size.y > 1000 && size.z > 10) {
+                  dtm = object;
+                  console.log('Layer DTM trovato per dimensioni:', object.name || 'no name');
+                }
+              }
+            });
+          }
         }
 
-        // Cerca potenziali DTM nella scena
-        const potentialDTMs = findPotentialDTM(threeScene);
-        console.log('Potenziali DTM trovati:', potentialDTMs.length);
-
-        // Stampa informazioni dettagliate sui potenziali DTM
-        potentialDTMs.forEach((item, index) => {
-          console.log(`Potenziale DTM #${index + 1}:`, item.object.name || '(senza nome)');
-          console.log('  Tipo:', item.object.type);
-          console.log('  Dimensioni:', item.size.x.toFixed(2), 'x', item.size.y.toFixed(2), 'x', item.size.z.toFixed(2));
-          console.log('  Posizione minima:', item.bbox.min.x.toFixed(2), item.bbox.min.y.toFixed(2), item.bbox.min.z.toFixed(2));
-          console.log('  Posizione massima:', item.bbox.max.x.toFixed(2), item.bbox.max.y.toFixed(2), item.bbox.max.z.toFixed(2));
-        });
-
-        if (potentialDTMs.length > 0) {
-          // Usa il più grande come DTM (quello con la maggiore estensione verticale)
-          const dtm = potentialDTMs[0].object;
-          console.log('DTM selezionato:', dtm.name || '(senza nome)', 'Dimensione:', potentialDTMs[0].size);
-
-          // crea lo stile etichette se serve
-          if (!document.getElementById('label2d-style')) {
-            const s = document.createElement('style');
-            s.id = 'label2d-style';
-            s.textContent = `
-            .label2d {
-              padding:2px 6px;
-              background:rgba(255,255,255,0.95);
-              border:1px solid #000;
-              color:#000;
-              font-weight:700;
-              font-size:12px;
-              border-radius:3px;
-              white-space:nowrap;
-              pointer-events:none;
-              position:absolute;
-              transform:translate(-50%,-50%);
-            }`;
-            document.head.appendChild(s);
-          }
-          // make DTM always visible
-          dtm.traverse(n => {
-            if (n.isMesh) {
-              const mats = Array.isArray(n.material) ? n.material : [n.material];
-              for (const m of mats) {
-                if (!m) continue;
-                if (typeof m.opacity !== 'number' || m.opacity === 1) m.opacity = 0.6;
-                m.transparent = true;
-                m.depthTest = false;
-                m.depthWrite = false;
-                m.side = THREE.DoubleSide;
-                m.needsUpdate = true;
-              }
-              n.renderOrder = 999;
-            }
-          });
-          // parallelepipedo params
-          const DEPTH = 10000;
-          const STEP = 1000;
-          const OFFSET_PX = 30;
-          // bbox DTM
-          const bb = new THREE.Box3().setFromObject(dtm);
-          // determina asse verticale
-          const totalBbox = new THREE.Box3().setFromObject(threeScene);
-          const totalSize = new THREE.Vector3(); totalBbox.getSize(totalSize);
-          let vertIndex = 1;
-          if (totalSize.x <= totalSize.y && totalSize.x <= totalSize.z) vertIndex = 0;
-          else if (totalSize.z <= totalSize.x && totalSize.z <= totalSize.y) vertIndex = 2;
-          const axes2 = [0,1,2].filter(i => i !== vertIndex);
-          // corner basso-destra (2D)
-          const maxA = bb.max.getComponent(axes2[0]);
-          const minB = bb.min.getComponent(axes2[1]);
-          const topZ = bb.max.getComponent(vertIndex);
-          const bottomZ = topZ - DEPTH;
-          const topCorners = [
-            new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ),
-            new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], bb.max.getComponent(axes2[1])).setComponent(vertIndex, topZ),
-            new THREE.Vector3().setComponent(axes2[0], bb.min.getComponent(axes2[0])).setComponent(axes2[1], bb.max.getComponent(axes2[1])).setComponent(vertIndex, topZ),
-            new THREE.Vector3().setComponent(axes2[0], bb.min.getComponent(axes2[0])).setComponent(axes2[1], minB).setComponent(vertIndex, topZ)
-          ];
-          const bottomCorners = topCorners.map(c => c.clone().setComponent(vertIndex, bottomZ));
-          const matLine = new THREE.LineBasicMaterial({ color: 0x000000 });
-          function addLine(p1, p2) {
-            const geom = new THREE.BufferGeometry().setFromPoints([p1.clone(), p2.clone()]);
-            const l = new THREE.Line(geom, matLine);
-            threeScene.add(l);
-            return l;
-          }
-          addLine(topCorners[0], topCorners[1]); addLine(topCorners[1], topCorners[2]);
-          addLine(topCorners[2], topCorners[3]); addLine(topCorners[3], topCorners[0]);
-          addLine(bottomCorners[0], bottomCorners[1]); addLine(bottomCorners[1], bottomCorners[2]);
-          addLine(bottomCorners[2], bottomCorners[3]); addLine(bottomCorners[3], bottomCorners[0]);
-          for (let i = 0; i < 4; i++) addLine(topCorners[i], bottomCorners[i]);
-          // labels on bottom-right column
-          const labels = [];
-          const cornerTop = topCorners[0].clone();
-          const centerFoot = new THREE.Vector3();
-          centerFoot.setComponent(axes2[0], (bb.max.getComponent(axes2[0]) + bb.min.getComponent(axes2[0])) / 2);
-          centerFoot.setComponent(axes2[1], (bb.max.getComponent(axes2[1]) + bb.min.getComponent(axes2[1])) / 2);
-          centerFoot.setComponent(vertIndex, 0);
-          const dirOut = cornerTop.clone().setComponent(vertIndex, 0).sub(centerFoot.clone().setComponent(vertIndex, 0));
-          if (dirOut.lengthSq() < 1e-6) { dirOut.setComponent(axes2[0], 1); dirOut.setComponent(axes2[1], 0); }
-          dirOut.setComponent(vertIndex, 0); dirOut.normalize();
-          const footprintSize = Math.max(bb.getSize(new THREE.Vector3()).x, bb.getSize(new THREE.Vector3()).y);
-          const labelOffset = OFFSET_PX * 0.01 * footprintSize;
-          for (let d = STEP; d <= DEPTH; d += STEP) {
-            const z = topZ - d;
-            const pos = cornerTop.clone().setComponent(vertIndex, z);
-            const posOut = pos.clone().add(dirOut.clone().multiplyScalar(labelOffset));
-            const div = document.createElement('div');
-            div.className = 'label2d';
-            div.textContent = `-${d} m`;
-            document.body.appendChild(div);
-            labels.push({ el: div, pos: posOut.clone() });
-          }
-          (function updateLabels() {
-            requestAnimationFrame(updateLabels);
-            try {
-              for (const L of labels) {
-                const p = L.pos.clone().project(camera);
-                if (p.z < -1 || p.z > 1) { L.el.style.display = 'none'; continue; }
-                const sx = (p.x + 1) * 0.5 * renderer.domElement.clientWidth;
-                const sy = (1 - p.y) * 0.5 * renderer.domElement.clientHeight;
-                L.el.style.display = '';
-                L.el.style.left = Math.round(sx) + 'px';
-                L.el.style.top = Math.round(sy) + 'px';
-              }
-            } catch (e) { /* ignore */ }
-          })();
-          console.log('Parallelepipedo aggiunto — topZ:', topZ, ' bottomZ:', bottomZ, ' cornerXY:', maxA, minB);
-        } else {
-          console.warn('Nessun oggetto trovato che potrebbe essere un DTM.');
-          console.log('Prova a modificare i criteri di ricerca nella funzione findPotentialDTM.');
+        if (!dtm) {
+          console.error('Impossibile trovare il layer DTM nella scena.');
           return;
         }
+
+        console.log('Layer DTM trovato:', dtm.name);
+
+        // Crea lo stile per le etichette se non esiste già
+        if (!document.getElementById('label2d-style')) {
+          const s = document.createElement('style');
+          s.id = 'label2d-style';
+          s.textContent = `
+          .label2d {
+            padding:2px 6px;
+            background:rgba(255,255,255,0.95);
+            border:1px solid #000;
+            color:#000;
+            font-weight:700;
+            font-size:12px;
+            border-radius:3px;
+            white-space:nowrap;
+            pointer-events:none;
+            position:absolute;
+            transform:translate(-50%,-50%);
+          }`;
+          document.head.appendChild(s);
+        }
+
+        // Rendi il DTM sempre visibile
+        dtm.traverse(n => {
+          if (n.isMesh) {
+            const mats = Array.isArray(n.material) ? n.material : [n.material];
+            for (const m of mats) {
+              if (!m) continue;
+              if (typeof m.opacity !== 'number' || m.opacity === 1) m.opacity = 0.6;
+              m.transparent = true;
+              m.depthTest = false;
+              m.depthWrite = false;
+              m.side = THREE.DoubleSide;
+              m.needsUpdate = true;
+            }
+            n.renderOrder = 999;
+          }
+        });
+
+        // Calcola il bounding box del DTM
+        const bb = new THREE.Box3().setFromObject(dtm);
+
+        // Determina l'asse verticale (Z di default)
+        let vertIndex = 2; // Z è l'asse verticale per default
+        const totalBbox = new THREE.Box3().setFromObject(threeScene);
+        const totalSize = new THREE.Vector3();
+        totalBbox.getSize(totalSize);
+
+        // Se l'altezza (Z) è la più piccola delle dimensioni, forse l'asse verticale è diverso
+        if (totalSize.z <= totalSize.x && totalSize.z <= totalSize.y) {
+          // Trova l'asse con la dimensione minima (ipotizzando che sia l'asse verticale)
+          if (totalSize.x <= totalSize.y && totalSize.x <= totalSize.z) vertIndex = 0;
+          else if (totalSize.y <= totalSize.x && totalSize.y <= totalSize.z) vertIndex = 1;
+          else vertIndex = 2;
+        }
+
+        console.log('Asse verticale identificato:', ['X','Y','Z'][vertIndex]);
+
+        // Estrai gli assi orizzontali
+        const axes2 = [0,1,2].filter(i => i !== vertIndex);
+        console.log('Assi orizzontali:', axes2.map(i => ['X','Y','Z'][i]).join(', '));
+
+        // Estrai i valori minimi e massimi per gli assi orizzontali
+        const minA = bb.min.getComponent(axes2[0]);
+        const maxA = bb.max.getComponent(axes2[0]);
+        const minB = bb.min.getComponent(axes2[1]);
+        const maxB = bb.max.getComponent(axes2[1]);
+        const minZ = bb.min.getComponent(vertIndex);
+        const maxZ = bb.max.getComponent(vertIndex);
+
+        console.log('Estremi del DTM:');
+        console.log(' - Min A (asse 1):', minA);
+        console.log(' - Max A (asse 1):', maxA);
+        console.log(' - Min B (asse 2):', minB);
+        console.log(' - Max B (asse 2):', maxB);
+        console.log(' - Min Z:', minZ);
+        console.log(' - Max Z:', maxZ);
+
+        // Definisci la profondità del parallelepipedo
+        const DEPTH = 10000; // Profondità totale
+        const STEP = 1000;   // Intervallo tra le etichette
+        const OFFSET_PX = 30; // Offset per le etichette
+
+        // Calcola il top e bottom Z per il parallelepipedo
+        const topZ = maxZ;
+        const bottomZ = topZ - DEPTH;
+
+        // Definisci i quattro angoli superiori e inferiori del parallelepipedo
+        const topCorners = [
+          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ), // angolo 1 (alto-destra)
+          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZ), // angolo 2 (alto-sinistra? No, alto-destra è maxA,minB)
+          // Errore nella precedente definizione, correggiamo:
+          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZ), // alto-destra (maxA, maxB)
+          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZ), // alto-sinistra (minA, maxB)
+          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ)  // basso-sinistra? No, alto-basso è la Z
+          // Mi sono confuso. Per un parallelepipedo rettangolare, abbiamo bisogno di 8 vertici:
+          // 4 in alto (topCorners) e 4 in basso (bottomCorners)
+        ];
+
+        // Definizione corretta dei 4 angoli superiori
+        const topCornersCorrect = [
+          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ), // angolo in alto a destra (front)
+          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZ), // angolo in alto a sinistra (front)
+          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZ), // angolo in alto a sinistra (back)
+          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ)  // angolo in alto a destra (back)
+        ];
+
+        // Definisci i 4 angoli inferiori (stesso XY, Z = bottomZ)
+        const bottomCorners = topCornersCorrect.map(c => c.clone().setComponent(vertIndex, bottomZ));
+
+        // Materiale per le linee del parallelepipedo
+        const matLine = new THREE.LineBasicMaterial({ color: 0x000000 });
+
+        // Funzione per aggiungere una linea tra due punti
+        function addLine(p1, p2) {
+          const geom = new THREE.BufferGeometry().setFromPoints([p1.clone(), p2.clone()]);
+          const l = new THREE.Line(geom, matLine);
+          threeScene.add(l);
+          return l;
+        }
+
+        // Disegna il parallelepipedo
+        console.log('Disegno del parallelepipedo...');
+
+        // Lati superiori (4 lati)
+        for (let i = 0; i < 4; i++) {
+          addLine(topCornersCorrect[i], topCornersCorrect[(i+1)%4]);
+        }
+
+        // Lati inferiori (4 lati)
+        for (let i = 0; i < 4; i++) {
+          addLine(bottomCorners[i], bottomCorners[(i+1)%4]);
+        }
+
+        // Lati verticali (4 lati)
+        for (let i = 0; i < 4; i++) {
+          addLine(topCornersCorrect[i], bottomCorners[i]);
+        }
+
+        // Etichette sulla colonna in alto a destra
+        const labels = [];
+        const cornerTop = topCornersCorrect[0].clone(); // angolo in alto a destra (front)
+        const cornerBottom = bottomCorners[0].clone(); // angolo in basso a destra
+
+        // Calcola il centro della base (proiezione 2D)
+        const centerFoot = new THREE.Vector3();
+        centerFoot.setComponent(axes2[0], (bb.max.getComponent(axes2[0]) + bb.min.getComponent(axes2[0])) / 2);
+        centerFoot.setComponent(axes2[1], (bb.max.getComponent(axes2[1]) + bb.min.getComponent(axes2[1])) / 2);
+        centerFoot.setComponent(vertIndex, 0);
+
+        // Direzione dal centro verso il corner (per posizionare le etichette)
+        const dirOut = cornerTop.clone().setComponent(vertIndex, 0).sub(centerFoot.clone().setComponent(vertIndex, 0));
+        if (dirOut.lengthSq() < 1e-6) {
+          // Se la direzione è quasi nulla, usiamo un vettore arbitrario
+          dirOut.setComponent(axes2[0], 1);
+          dirOut.setComponent(axes2[1], 0);
+        }
+        dirOut.setComponent(vertIndex, 0);
+        dirOut.normalize();
+
+        // Calcola la dimensione del footprint (base) per l'offset
+        const footprintSize = Math.max(
+          bb.getSize(new THREE.Vector3()).getComponent(axes2[0]),
+          bb.getSize(new THREE.Vector3()).getComponent(axes2[1])
+        );
+
+        const labelOffset = OFFSET_PX * 0.01 * footprintSize;
+
+        // Crea le etichette ogni STEP metri (1000m) lungo la colonna
+        for (let d = 0; d <= DEPTH; d += STEP) {
+          const z = topZ - d;
+          const pos = cornerTop.clone().setComponent(vertIndex, z);
+          const posOut = pos.clone().add(dirOut.clone().multiplyScalar(labelOffset));
+
+          const div = document.createElement('div');
+          div.className = 'label2d';
+          div.textContent = `-${d} m`;
+          document.body.appendChild(div);
+
+          labels.push({
+            el: div,
+            pos: posOut.clone()
+          });
+        }
+
+        // Funzione per aggiornare la posizione delle etichette
+        function updateLabels() {
+          requestAnimationFrame(updateLabels);
+          try {
+            for (const L of labels) {
+              const p = L.pos.clone().project(camera);
+              if (p.z < -1 || p.z > 1) {
+                L.el.style.display = 'none';
+                continue;
+              }
+              const sx = (p.x + 1) * 0.5 * renderer.domElement.clientWidth;
+              const sy = (1 - p.y) * 0.5 * renderer.domElement.clientHeight;
+              L.el.style.display = '';
+              L.el.style.left = Math.round(sx) + 'px';
+              L.el.style.top = Math.round(sy) + 'px';
+            }
+          } catch (e) {
+            // Ignora gli errori di aggiornamento delle etichette
+          }
+        }
+        updateLabels(); // Avvia il ciclo di aggiornamento
+
+        console.log('Parallelepipedo e etichette aggiunti con successo.');
+
       } catch (err) {
         console.error('Errore nel callback parallelepipedo:', err);
       }
