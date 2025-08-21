@@ -252,7 +252,7 @@ try {
         // Definisci la profondità del parallelepipedo
         const DEPTH = 10000; // Profondità totale in metri
         const STEP = 1000;   // Intervallo tra le etichette
-        const OFFSET_PX = 30; // Offset per le etichette
+        const LABEL_OFFSET = 30; // Offset delle etichette verso l'esterno
 
         // Il livello 0 metri è z=0 nel sistema di coordinate
         const referenceZ = 0; // Livello 0 metri corrisponde a z=0
@@ -306,28 +306,20 @@ try {
           addLine(topCorners[i], bottomCorners[i]);
         }
 
-        // Etichette sulla colonna in alto a destra
-        const labels = [];
+        // Creazione delle etichette sulla colonna in basso a destra (topCorners[0] -> bottomCorners[0])
+        const labelOffset = LABEL_OFFSET; // offset verso l'esterno
 
-        // Il punto in alto a destra è topCorners[3]
-        const topRightCorner = topCorners[3].clone();
-        const bottomRightCorner = bottomCorners[3].clone();
-
-        // Ora, invece di spostare le etichette verso l'interno, le posizioniamo esattamente sull'asse verticale
-        // ma con un piccolo offset per la leggibilità (solo in direzione X/Y, non Z)
-
-        // Calcoliamo la direzione lungo l'asse verticale (per riferimento)
-        const verticalDir = new THREE.Vector3();
-        verticalDir.setComponent(vertIndex, -1); // Verso il basso
-
-        // Per un piccolo offset orizzontale (opzionale, per evitare sovrapposizioni con i bordi)
-        // Calcoliamo la direzione dal centro verso l'angolo in alto a destra
+        // Calcola il centro del footprint
         const centerFoot = new THREE.Vector3();
         centerFoot.setComponent(axes2[0], (maxA + minA) / 2);
         centerFoot.setComponent(axes2[1], (maxB + minB) / 2);
         centerFoot.setComponent(vertIndex, 0);
 
-        const dirOut = topRightCorner.clone().setComponent(vertIndex, 0).sub(centerFoot.clone().setComponent(vertIndex, 0));
+        // Angolo in basso a destra (topCorners[0])
+        const cornerTop = topCorners[0].clone();
+
+        // Direzione verso l'esterno dal centro al corner
+        const dirOut = cornerTop.clone().setComponent(vertIndex, 0).sub(centerFoot.clone().setComponent(vertIndex, 0));
         if (dirOut.lengthSq() < 1e-6) {
           // Se la direzione è quasi nulla, usiamo un vettore arbitrario verso l'esterno
           dirOut.setComponent(axes2[0], 1);
@@ -336,29 +328,10 @@ try {
         dirOut.setComponent(vertIndex, 0);
         dirOut.normalize();
 
-        // Calcola la dimensione del footprint (base) per l'offset delle etichette
-        const footprintSize = Math.max(
-          bb.getSize(new THREE.Vector3()).getComponent(axes2[0]),
-          bb.getSize(new THREE.Vector3()).getComponent(axes2[1])
-        );
-
-        // Aggiungi un piccolo offset per evitare che le etichette tocchino il bordo
-        // Questo offset sarà applicato solo agli assi orizzontali
-        const labelOffset = OFFSET_PX * 0.01 * footprintSize;
-
-        // Direzione verso l'interno (opposta a dirOut) per un piccolo offset
-        const dirIn = dirOut.clone().negate();
-        const offsetVec = dirIn.clone().multiplyScalar(labelOffset);
-        offsetVec.setComponent(vertIndex, 0); // Mantieni la componente Z a 0
-
-        // Crea le etichette ogni STEP metri lungo la colonna verticale
-        for (let d = 0; d <= DEPTH; d += STEP) {
-          // Posizione lungo la colonna verticale (stesso X e Y del topRightCorner, Z variabile)
-          const pos = topRightCorner.clone();
-          pos.setComponent(vertIndex, topZParallelepiped - d);
-
-          // Aggiungi un piccolo offset orizzontale per evitare che le etichette siano esattamente sul bordo
-          const posWithOffset = pos.clone().add(offsetVec);
+        // Crea le etichette ogni -1000m lungo la colonna verticale
+        for (let d = 1000; d <= DEPTH; d += STEP) {
+          const z = topZParallelepiped - d; // negativa
+          const pos = cornerTop.clone().setComponent(vertIndex, z).add(dirOut.clone().multiplyScalar(labelOffset));
 
           const div = document.createElement('div');
           div.className = 'label2d';
@@ -369,7 +342,25 @@ try {
           // Salva il punto 3D e l'elemento DOM per l'aggiornamento
           labels.push({
             el: div,
-            pos: posWithOffset.clone()
+            pos: pos.clone()
+          });
+        }
+
+        // Crea un'etichetta anche per lo 0 (livello del mare)
+        {
+          const z = topZParallelepiped; // 0 metri
+          const pos = cornerTop.clone().setComponent(vertIndex, z).add(dirOut.clone().multiplyScalar(labelOffset));
+
+          const div = document.createElement('div');
+          div.className = 'label2d';
+          div.textContent = `0 m`;
+          div.style.zIndex = '1000';
+          document.body.appendChild(div);
+
+          // Salva il punto 3D e l'elemento DOM per l'aggiornamento
+          labels.push({
+            el: div,
+            pos: pos.clone()
           });
         }
 
