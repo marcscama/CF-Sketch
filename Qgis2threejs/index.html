@@ -137,12 +137,55 @@ try {
           console.warn('Ambiente rendering non disponibile nel callback (THREE/scene/camera/renderer).');
           return;
         }
-        const dtm = threeScene.getObjectByName('DTM');
+
+        // Stampa tutti gli oggetti nella scena per debug
+        console.log('Oggetti nella scena:');
+        threeScene.traverse(function(object) {
+          if (object.isMesh || object.isGroup) {
+            console.log('Oggetto trovato:', object.name, object.type);
+          }
+        });
+
+        // Cerca l'oggetto DTM con nomi alternativi
+        let dtm = threeScene.getObjectByName('DTM');
         if (!dtm) {
-          console.warn('DTM non trovato nella scena (getObjectByName("DTM")).');
+          // Prova con nomi alternativi comuni per DTM
+          const alternativeNames = ['dtm', 'terrain', 'terreno', 'elevation', 'altitudine', 'dem', 'DEM'];
+          for (const name of alternativeNames) {
+            dtm = threeScene.getObjectByName(name);
+            if (dtm) {
+              console.log('DTM trovato con nome alternativo:', name);
+              break;
+            }
+          }
+        }
+
+        // Se ancora non trovato, cerca in modo più approfondito
+        if (!dtm) {
+          console.log('Ricerca approfondita del DTM...');
+          threeScene.traverse(function(object) {
+            if (!dtm && (object.isMesh || object.isGroup)) {
+              // Cerca oggetti che potrebbero essere il DTM basandosi sul tipo
+              if (!dtm && object.isMesh && object.geometry && object.geometry.attributes && object.geometry.attributes.position) {
+                // Controlla se l'oggetto ha un'estensione significativa in Z (tipico di un DTM)
+                const bbox = new THREE.Box3().setFromObject(object);
+                const size = bbox.getSize(new THREE.Vector3());
+                if (size.x > 100 && size.y > 100 && size.z > 10) { // Valori arbitrari per identificare un DTM
+                  dtm = object;
+                  console.log('DTM trovato attraverso ricerca approfondita:', object.name, object.type);
+                }
+              }
+            }
+          });
+        }
+
+        if (!dtm) {
+          console.warn('DTM non trovato nella scena con nessun metodo.');
           return;
         }
+
         console.log('DTM trovato:', dtm.name);
+
         // crea lo stile etichette se serve
         if (!document.getElementById('label2d-style')) {
           const s = document.createElement('style');
