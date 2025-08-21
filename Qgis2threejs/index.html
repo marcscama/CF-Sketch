@@ -30,6 +30,14 @@
 <script src="./threejs/ViewHelper.js"></script>
 <script src="./threejs/OutlineEffect.js"></script>
 <script src="./Qgis2threejs.js"></script>
+<!-- Line2 locali (dal tuo repo in ./lines/) -->
+  <script src="./lines/LineGeometry.js"></script>
+  <script src="./lines/LineMaterial.js"></script>
+  <script src="./lines/Line2.js"></script>
+
+  <!-- Qgis2threejs core (preserved) -->
+  <script src="Qgis2threejs.js"></script>
+  
 </head>
 <body>
   <div id="container"></div>
@@ -41,14 +49,6 @@
     <label>Spessore <input id="thickness" type="range" min="1" max="30" value="6"></label>
     <label>Eraser size <input id="eraserSize" type="range" min="8" max="120" value="32"></label>
   </div>
-  <!-- Line2 locali (dal tuo repo in ./lines/) -->
-  <script src="./lines/LineGeometry.js"></script>
-  <script src="./lines/LineMaterial.js"></script>
-  <script src="./lines/Line2.js"></script>
-
-  <!-- Qgis2threejs core (preserved) -->
-  <script src="Qgis2threejs.js"></script>
-
   <script>
     // Basic scene setup
     const container = document.getElementById('container');
