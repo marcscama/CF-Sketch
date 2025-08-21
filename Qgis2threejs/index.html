@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Terremoti Campi Flegrei dal 2005 al 07-2025 con MD>=2</title>
+<title>terremoti-07-2025</title>
 <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 <base target="_blank">
 <link rel="stylesheet" type="text/css" href="./Qgis2threejs.css">
@@ -10,26 +10,12 @@
 #popup, #header, #layerpanel {
   left: 36px;
 }
-.label2d {
-  padding:2px 6px;
-  background:rgba(255,255,255,0.95);
-  border:1px solid #000;
-  color:#000;
-  font-weight:700;
-  font-size:12px;
-  border-radius:3px;
-  white-space:nowrap;
-  pointer-events:none;
-  position:absolute;
-  transform:translate(-50%,-50%);
-  /* Aggiungiamo un z-index più basso per le etichette */
-  z-index: 100;
-}
 </style>
 <script src="./threejs/three.min.js"></script>
 <script src="./threejs/OrbitControls.js"></script>
 <script src="./threejs/ViewHelper.js"></script>
 <script src="./threejs/OutlineEffect.js"></script>
+<script src="./threejs/CSS2DRenderer.js"></script>
 <script src="./Qgis2threejs.js"></script>
 </head>
 <body>
@@ -112,6 +98,10 @@
   <div id="nextbtn"></div>
 </div>
 <script>
+// Aggiungiamo CSS2DRenderer per gestire le etichette come oggetti 3D
+let labelRenderer;
+let labelScene;
+
 // Configurazione iniziale
 Q3D.Config.allVisible = true;
 Q3D.Config.bgColor = 0xffffff;
@@ -160,6 +150,18 @@ try {
           return;
         }
 
+        // Creiamo un renderer CSS2D per le etichette
+        labelRenderer = new THREE.CSS2DRenderer();
+        labelRenderer.setSize(container.clientWidth, container.clientHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0';
+        labelRenderer.domElement.style.left = '0';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        container.appendChild(labelRenderer.domElement);
+
+        // Creiamo una scena separata per le etichette CSS2D
+        labelScene = new THREE.Scene();
+
         // Cerca il layer DTM usando il layerId: 2
         let dtm = null;
 
@@ -178,27 +180,25 @@ try {
 
         console.log('Layer DTM trovato:', dtm.name || 'no name');
 
-        // Crea lo stile per le etichette se non esiste già
-        if (!document.getElementById('label2d-style')) {
-          const s = document.createElement('style');
-          s.id = 'label2d-style';
-          s.textContent = `
-          .label2d {
-            padding:2px 6px;
-            background:rgba(255,255,255,0.95);
-            border:1px solid #000;
-            color:#000;
-            font-weight:700;
-            font-size:12px;
-            border-radius:3px;
-            white-space:nowrap;
-            pointer-events:none;
-            position:absolute;
-            transform:translate(-50%,-50%);
-            z-index: 100;
-          }`;
-          document.head.appendChild(s);
-        }
+        // Stile per le etichette CSS2D
+        const labelStyle = `
+        .label2d {
+          padding:2px 6px;
+          background:rgba(255,255,255,0.95);
+          border:1px solid #000;
+          color:#000;
+          font-weight:700;
+          font-size:12px;
+          border-radius:3px;
+          white-space:nowrap;
+          pointer-events:none;
+          transform:translate(-50%,-50%);
+        }`;
+
+        // Aggiungi lo stile alla pagina
+        const styleElement = document.createElement('style');
+        styleElement.textContent = labelStyle;
+        document.head.appendChild(styleElement);
 
         // Rendi il DTM sempre visibile
         dtm.traverse(n => {
@@ -213,7 +213,7 @@ try {
               m.side = THREE.DoubleSide;
               m.needsUpdate = true;
             }
-            n.renderOrder = 999;
+            n.renderOrder = 100; // Imposta un renderOrder basso per il DTM
           }
         });
 
@@ -357,14 +357,13 @@ try {
           const div = document.createElement('div');
           div.className = 'label2d';
           div.textContent = `-${d} m`;
-          div.style.zIndex = '100'; // z-index più basso per le etichette
-          document.body.appendChild(div);
 
-          // Salva il punto 3D e l'elemento DOM per l'aggiornamento
-          labels.push({
-            el: div,
-            pos: pos.clone()
-          });
+          // Crea un oggetto CSS2D per l'etichetta
+          const label = new THREE.CSS2DObject(div);
+          label.position.copy(pos);
+          label.renderOrder = 10; // Imposta un renderOrder basso per le etichette
+          labelScene.add(label);
+          labels.push(label);
         }
 
         // Crea un'etichetta anche per lo 0 (livello del mare)
@@ -375,37 +374,36 @@ try {
           const div = document.createElement('div');
           div.className = 'label2d';
           div.textContent = `0 m`;
-          div.style.zIndex = '100'; // z-index più basso per le etichette
-          document.body.appendChild(div);
 
-          // Salva il punto 3D e l'elemento DOM per l'aggiornamento
-          labels.push({
-            el: div,
-            pos: pos.clone()
-          });
+          // Crea un oggetto CSS2D per l'etichetta
+          const label = new THREE.CSS2DObject(div);
+          label.position.copy(pos);
+          label.renderOrder = 10; // Imposta un renderOrder basso per le etichette
+          labelScene.add(label);
+          labels.push(label);
         }
 
-        // Funzione per aggiornare la posizione delle etichette
-        function updateLabels() {
-          requestAnimationFrame(updateLabels);
-          try {
-            for (const L of labels) {
-              const p = L.pos.clone().project(camera);
-              if (p.z < -1 || p.z > 1) {
-                L.el.style.display = 'none';
-                continue;
-              }
-              const sx = (p.x + 1) * 0.5 * renderer.domElement.clientWidth;
-              const sy = (1 - p.y) * 0.5 * renderer.domElement.clientHeight;
-              L.el.style.display = '';
-              L.el.style.left = Math.round(sx) + 'px';
-              L.el.style.top = Math.round(sy) + 'px';
-            }
-          } catch (e) {
-            console.error('Errore durante l\'aggiornamento delle etichette:', e);
+        // Imposta il renderOrder per il parallelepipedo
+        threeScene.traverse(function(object) {
+          if (object.isLine) { // Questo è il nostro parallelepipedo
+            object.renderOrder = 50; // RenderOrder intermedio
           }
-        }
-        updateLabels();
+        });
+
+        // Aggiungi un gestore per il ridimensionamento della finestra
+        window.addEventListener('resize', function() {
+          labelRenderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        // Modifica il loop di rendering per includere le etichette CSS2D
+        const originalRender = renderer.render;
+        renderer.render = function(scene, camera) {
+          // Rendering della scena principale
+          originalRender.call(renderer, scene, camera);
+
+          // Rendering delle etichette
+          labelRenderer.render(labelScene, camera);
+        };
 
         console.log('Parallelepipedo e etichette aggiunti con successo.');
 
