@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Terremoti Campi Flegrei dal 2005 al 07-2025 con MD>=2</title>
+<title>terremoti-07-2025</title>
 <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 <base target="_blank">
 <link rel="stylesheet" type="text/css" href="./Qgis2threejs.css">
@@ -10,19 +10,22 @@
 #popup, #header, #layerpanel {
   left: 36px;
 }
+/* Stile per etichette DOM (CSS) - come volevi */
 .label2d {
-  padding:2px 6px;
+  padding:6px 8px;
   background:rgba(255,255,255,0.95);
-  border:1px solid #000;
+  border:1px solid rgba(0,0,0,0.9);
   color:#000;
   font-weight:700;
-  font-size:12px;
-  border-radius:3px;
+  font-size:11px;         /* carattere un po' più piccolo */
+  border-radius:4px;
   white-space:nowrap;
-  pointer-events:none;
+  pointer-events:none;    /* non interferiscono con mouse */
   position:absolute;
   transform:translate(-50%,-50%);
-  z-index: 100;
+  z-index: 10;            /* rimangono sopra altri elementi DOM */
+  transition: opacity 0.12s linear;
+  will-change: transform, opacity;
 }
 </style>
 <script src="./threejs/three.min.js"></script>
@@ -111,7 +114,7 @@
   <div id="nextbtn"></div>
 </div>
 <script>
-// Configurazione iniziale
+// Configurazione iniziale (mantengo quanto già funzionante)
 Q3D.Config.allVisible = true;
 Q3D.Config.bgColor = 0xffffff;
 Q3D.Config.viewpoint = {
@@ -120,7 +123,6 @@ Q3D.Config.viewpoint = {
 };
 Q3D.Config.localMode = true;
 
-// Inizializzazione
 var container = document.getElementById("view"),
     app = Q3D.application,
     gui = Q3D.gui;
@@ -161,8 +163,6 @@ try {
 
         // Cerca il layer DTM usando il layerId: 2
         let dtm = null;
-
-        // Cerca in tutta la scena
         threeScene.traverse(function(object) {
           if (object.userData && object.userData.layerId === 2) {
             dtm = object;
@@ -175,31 +175,7 @@ try {
           return;
         }
 
-        console.log('Layer DTM trovato:', dtm.name || 'no name');
-
-        // Crea lo stile per le etichette se non esiste già
-        if (!document.getElementById('label2d-style')) {
-          const s = document.createElement('style');
-          s.id = 'label2d-style';
-          s.textContent = `
-          .label2d {
-            padding:2px 6px;
-            background:rgba(255,255,255,0.95);
-            border:1px solid #000;
-            color:#000;
-            font-weight:700;
-            font-size:12px;
-            border-radius:3px;
-            white-space:nowrap;
-            pointer-events:none;
-            position:absolute;
-            transform:translate(-50%,-50%);
-            z-index: 100;
-          }`;
-          document.head.appendChild(s);
-        }
-
-        // Rendi il DTM sempre visibile
+        // Rendi il DTM sempre visibile (mantengo le tue impostazioni)
         dtm.traverse(n => {
           if (n.isMesh) {
             const mats = Array.isArray(n.material) ? n.material : [n.material];
@@ -212,11 +188,11 @@ try {
               m.side = THREE.DoubleSide;
               m.needsUpdate = true;
             }
-            n.renderOrder = 100; // Imposta un renderOrder basso per il DTM
+            n.renderOrder = 100;
           }
         });
 
-        // Trova il layer dei terremoti (supponiamo che abbia layerId: 0)
+        // Trova il layer dei terremoti (layerId: 0)
         let earthquakesLayer = null;
         threeScene.traverse(function(object) {
           if (object.userData && object.userData.layerId === 0) {
@@ -229,265 +205,173 @@ try {
         if (earthquakesLayer) {
           earthquakesLayer.traverse(n => {
             if (n.isMesh) {
-              n.renderOrder = 2000; // Imposta un renderOrder alto per le sfere dei terremoti
+              n.renderOrder = 2000;
             }
           });
         }
 
-        // Calcola il bounding box del DTM
+        // Bounding box e calcoli assi come prima
         const bb = new THREE.Box3().setFromObject(dtm);
-        console.log('Bounding box del DTM:', bb);
-
-        // Determina l'asse verticale (Z di default)
-        let vertIndex = 2; // Assumiamo Z come asse verticale per default
-
-        // Verifichiamo se la dimensione Z è effettivamente la più piccola (tipico per i DTM)
         const size = bb.getSize(new THREE.Vector3());
-        console.log('Dimensioni del DTM:', size.x, size.y, size.z);
-
-        // Se Z non è la dimensione più piccola, forse l'asse verticale è diverso
+        let vertIndex = 2;
         const minDimIndex = (size.x < size.y) ?
                           ((size.x < size.z) ? 0 : 2) :
                           ((size.y < size.z) ? 1 : 2);
         vertIndex = minDimIndex;
-        console.log('Asse verticale identificato:', ['X','Y','Z'][vertIndex]);
-
-        // Estrai gli assi orizzontali
         const axes2 = [0,1,2].filter(i => i !== vertIndex);
-        console.log('Assi orizzontali:', axes2.map(i => ['X','Y','Z'][i]).join(', '));
-
-        // Estrai i valori minimi e massimi per gli assi orizzontali e verticale
         const minA = bb.min.getComponent(axes2[0]);
         const maxA = bb.max.getComponent(axes2[0]);
         const minB = bb.min.getComponent(axes2[1]);
         const maxB = bb.max.getComponent(axes2[1]);
-        const minZ = bb.min.getComponent(vertIndex);
-        const maxZ = bb.max.getComponent(vertIndex);
 
-        console.log('Estremi del DTM:');
-        console.log(' - Asse 1 (min/max):', minA, maxA);
-        console.log(' - Asse 2 (min/max):', minB, maxB);
-        console.log(' - Asse Z (min/max):', minZ, maxZ);
-
-        // Definisci la profondità del parallelepipedo
-        const DEPTH = 10000; // Profondità totale in metri
-        const STEP = 1000;   // Intervallo tra le etichette
-        const LABEL_OFFSET = 30; // Offset delle etichette verso l'esterno
-
-        // Il livello 0 metri è z=0 nel sistema di coordinate
-        const referenceZ = 0; // Livello 0 metri corrisponde a z=0
-
-        // Il parallelepipedo parte dal livello 0 metri (referenceZ) e va verso il basso
+        // Parametri del parallelepipedo e etichette
+        const DEPTH = 10000;
+        const STEP = 1000;
+        const LABEL_OFFSET = 30;
+        const referenceZ = 0;
         const topZParallelepiped = referenceZ;
         const bottomZParallelepiped = referenceZ - DEPTH;
 
-        // Definiamo i vertici del parallelepipedo
         const topCorners = [
-          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZParallelepiped), // angolo in basso a destra (livello 0)
-          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZParallelepiped), // angolo in basso a sinistra
-          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZParallelepiped), // angolo in alto a sinistra
-          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], minB).setComponent(vertIndex, topZParallelepiped)  // angolo in alto a destra
+          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZParallelepiped),
+          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZParallelepiped),
+          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZParallelepiped),
+          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], minB).setComponent(vertIndex, topZParallelepiped)
         ];
-
-        // Vertici inferiori del parallelepipedo
         const bottomCorners = topCorners.map(c => c.clone().setComponent(vertIndex, bottomZParallelepiped));
 
-        // Materiale per le linee del parallelepipedo
-        const matLine = new THREE.LineBasicMaterial({
-          color: 0x000000,
-          linewidth: 2,
-          opacity: 0.8,
-          transparent: true
-        });
+        // Linee del parallelepipedo (come prima)
+        const matLine = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2, opacity: 0.8, transparent: true });
+        function addLine(p1,p2){ const geom=new THREE.BufferGeometry().setFromPoints([p1.clone(), p2.clone()]); const l=new THREE.Line(geom, matLine); threeScene.add(l); return l; }
+        for(let i=0;i<4;i++){ addLine(topCorners[i], topCorners[(i+1)%4]); }
+        for(let i=0;i<4;i++){ addLine(bottomCorners[i], bottomCorners[(i+1)%4]); }
+        for(let i=0;i<4;i++){ addLine(topCorners[i], bottomCorners[i]); }
 
-        // Funzione per aggiungere una linea tra due punti
-        function addLine(p1, p2) {
-          const geom = new THREE.BufferGeometry().setFromPoints([p1.clone(), p2.clone()]);
-          const l = new THREE.Line(geom, matLine);
-          threeScene.add(l);
-          return l;
-        }
-
-        // Disegna il parallelepipedo
-        console.log('Disegno del parallelepipedo...');
-
-        // Lati superiori (orizzontali)
-        for (let i = 0; i < 4; i++) {
-          addLine(topCorners[i], topCorners[(i+1)%4]);
-        }
-
-        // Lati inferiori (orizzontali)
-        for (let i = 0; i < 4; i++) {
-          addLine(bottomCorners[i], bottomCorners[(i+1)%4]);
-        }
-
-        // Lati verticali
-        for (let i = 0; i < 4; i++) {
-          addLine(topCorners[i], bottomCorners[i]);
-        }
-
-        // Creazione delle etichette sulla colonna in basso a destra (topCorners[0] -> bottomCorners[0])
+        // Punto centrale per calcolo direzione etichette
         const centerFoot = new THREE.Vector3();
         centerFoot.setComponent(axes2[0], (maxA + minA) / 2);
         centerFoot.setComponent(axes2[1], (maxB + minB) / 2);
         centerFoot.setComponent(vertIndex, 0);
-
-        // Angolo in basso a destra (topCorners[0])
         const cornerTop = topCorners[0].clone();
-
-        // Direzione verso l'esterno dal centro al corner
         const dirOut = cornerTop.clone().setComponent(vertIndex, 0).sub(centerFoot.clone().setComponent(vertIndex, 0));
-        if (dirOut.lengthSq() < 1e-6) {
-          // Se la direzione è quasi nulla, usiamo un vettore arbitrario verso l'esterno
-          dirOut.setComponent(axes2[0], 1);
-          dirOut.setComponent(axes2[1], 0);
-        }
+        if (dirOut.lengthSq() < 1e-6){ dirOut.setComponent(axes2[0], 1); dirOut.setComponent(axes2[1], 0); }
         dirOut.setComponent(vertIndex, 0);
         dirOut.normalize();
 
-        // ----------------------------
-        // SOSTITUZIONE ETICHETTE: SPRITE 3D (THREE.Sprite)
-        // ----------------------------
+        // --- NUOVA LOGICA: etichette DOM + occlusione approssimata dalle sfere ---
+        const labels = [];       // { el: DOMElement, pos: THREE.Vector3 }
+        const sphereMeshes = []; // lista di mesh sfera per controllare l'occlusione
 
-        // Array per memorizzare gli sprite etichetta
-        const labelSprites = [];
-
-        // funzione di utilità per disegnare un testo su canvas e creare uno sprite
-        function createTextSprite(text) {
-          // testo e dimensioni di base (regola se vuoi font più piccolo)
-          const fontSize = 48; // px su canvas (adatta poi lo scale 3D)
-          const padding = 12;
-          const ratio = window.devicePixelRatio || 1;
-
-          // canvas temporaneo per misurazione
-          const measureCanvas = document.createElement('canvas');
-          const mctx = measureCanvas.getContext('2d');
-          mctx.font = `${fontSize}px Arial`;
-          const metrics = mctx.measureText(text);
-          const w = Math.ceil(metrics.width) + padding * 2;
-          const h = Math.ceil(fontSize) + padding * 2;
-
-          // canvas reale con DPR per nitidezza
-          const canvas = document.createElement('canvas');
-          canvas.width = w * ratio;
-          canvas.height = h * ratio;
-          canvas.style.width = `${w}px`;
-          canvas.style.height = `${h}px`;
-          const ctx = canvas.getContext('2d');
-          ctx.scale(ratio, ratio);
-
-          // background arrotondato
-          const radius = 6;
-          ctx.fillStyle = 'rgba(255,255,255,0.95)';
-          ctx.strokeStyle = 'rgba(0,0,0,1)';
-          ctx.lineWidth = 2;
-          // rounded rect
-          ctx.beginPath();
-          ctx.moveTo(radius + padding, padding);
-          ctx.lineTo(w - radius - padding, padding);
-          ctx.quadraticCurveTo(w - padding, padding, w - padding, padding + radius);
-          ctx.lineTo(w - padding, h - radius - padding);
-          ctx.quadraticCurveTo(w - padding, h - padding, w - radius - padding, h - padding);
-          ctx.lineTo(radius + padding, h - padding);
-          ctx.quadraticCurveTo(padding, h - padding, padding, h - radius - padding);
-          ctx.lineTo(padding, padding + radius);
-          ctx.quadraticCurveTo(padding, padding, padding + radius, padding);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-
-          // testo
-          ctx.font = `${fontSize}px Arial`;
-          ctx.fillStyle = '#000';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(text, padding, h / 2);
-
-          // crea texture e sprite
-          const texture = new THREE.CanvasTexture(canvas);
-          texture.minFilter = THREE.LinearFilter;
-          texture.needsUpdate = true;
-
-          const material = new THREE.SpriteMaterial({
-            map: texture,
-            transparent: true,
+        // Raccogli le mesh sfera (assumendo che i terremoti siano mesh sotto earthquakesLayer)
+        if (earthquakesLayer) {
+          earthquakesLayer.traverse(function(n) {
+            if (n.isMesh) {
+              sphereMeshes.push(n);
+            }
           });
-
-          // permetti il depthTest così le sfere possono occultare le etichette
-          material.depthTest = true;
-          // non scriviamo nel depth buffer (meglio per trasparenze)
-          material.depthWrite = false;
-
-          const sprite = new THREE.Sprite(material);
-          // centro del sprite al centro della texture
-          sprite.center.set(0.5, 0.5);
-
-          // scala iniziale ragionevole; la adegueremo dinamicamente in update
-          const aspect = (canvas.width / ratio) / (canvas.height / ratio);
-          sprite.scale.set(1 * aspect, 1, 1); // valore base: 1 (poi scala in funzione della distanza)
-
-          return sprite;
         }
 
-        // Crea gli sprite per le etichette ogni -1000m e per 0 m
+        // Crea le etichette DOM per -1000, -2000, ... e 0 m
+        function createLabel(text, worldPos) {
+          const div = document.createElement('div');
+          div.className = 'label2d';
+          div.textContent = text;
+          div.style.opacity = '1';
+          document.body.appendChild(div);
+          labels.push({ el: div, pos: worldPos.clone() });
+        }
+
         for (let d = 1000; d <= DEPTH; d += STEP) {
-          const z = topZParallelepiped - d; // negativo
+          const z = topZParallelepiped - d;
           const pos = cornerTop.clone().setComponent(vertIndex, z).add(dirOut.clone().multiplyScalar(LABEL_OFFSET));
-
-          const sprite = createTextSprite(`-${d} m`);
-          sprite.position.copy(pos);
-          threeScene.add(sprite);
-          labelSprites.push(sprite);
+          createLabel(`-${d} m`, pos);
         }
-
         // 0 m
         {
           const z = topZParallelepiped;
           const pos = cornerTop.clone().setComponent(vertIndex, z).add(dirOut.clone().multiplyScalar(LABEL_OFFSET));
-          const sprite = createTextSprite(`0 m`);
-          sprite.position.copy(pos);
-          threeScene.add(sprite);
-          labelSprites.push(sprite);
+          createLabel(`0 m`, pos);
         }
 
-        // Funzione di aggiornamento: scala gli sprite in funzione della distanza per mantenere leggibilità
-        function updateLabelSprites() {
-          const camPos = camera.position;
-          for (const sp of labelSprites) {
-            // distanza camera -> sprite
-            const dist = camPos.distanceTo(sp.position);
+        // Parametri per la logica di occlusione DOM
+        const OCCLUSION_PIXEL_THRESHOLD = 20; // soglia in pixel per considerare che una sfera "copre" l'etichetta
+        // puoi abbassare a 12 o aumentare a 40 a seconda della dimensione delle sfere nell'app
 
-            // Regola questo fattore per cambiare la dimensione a schermo
-            // (valori più grandi = etichette più grandi)
-            const baseSize = 0.06; // tuning: modifica se necessario
+        // Funzione di aggiornamento delle etichette (posizione e occlusione)
+        const tmpVec = new THREE.Vector3();
+        const proj = new THREE.Vector3();
+        function updateLabels() {
+          const widthHalf = container.clientWidth / 2;
+          const heightHalf = container.clientHeight / 2;
+          // Pre-proiettiamo tutte le sfere (posizioni e depth) per velocizzare
+          const projectedSpheres = [];
+          for (const mesh of sphereMeshes) {
+            // posizione mondo della sfera (centro)
+            mesh.getWorldPosition(tmpVec);
+            proj.copy(tmpVec).project(camera);
+            // converti a pixel
+            const sx = (proj.x * widthHalf) + widthHalf;
+            const sy = -(proj.y * heightHalf) + heightHalf;
+            projectedSpheres.push({
+              mesh: mesh,
+              ndcZ: proj.z,
+              sx: sx,
+              sy: sy
+            });
+          }
 
-            // manteniamo l'aspetto originale dell'immagine
-            const img = sp.material.map.image;
-            const imgWidth = (img.width / (window.devicePixelRatio || 1));
-            const imgHeight = (img.height / (window.devicePixelRatio || 1));
-            const aspect = imgWidth / imgHeight;
+          // ora aggiorniamo ogni etichetta
+          for (const label of labels) {
+            // proietta posizione etichetta
+            const v = label.pos.clone().project(camera);
+            // se dietro la telecamera, nascondi
+            if (v.z < -1 || v.z > 1) {
+              label.el.style.display = 'none';
+              continue;
+            }
+            const lx = (v.x * widthHalf) + widthHalf;
+            const ly = -(v.y * heightHalf) + heightHalf;
 
-            // scala proporzionale alla distanza
-            const scaleY = dist * baseSize;
-            const scaleX = scaleY * aspect;
+            // Posiziona l'elemento DOM (centrato)
+            label.el.style.display = '';
+            label.el.style.left = `${Math.round(lx)}px`;
+            label.el.style.top = `${Math.round(ly)}px`;
 
-            sp.scale.set(scaleX, scaleY, 1);
+            // Controllo di occlusione: se esiste almeno una sfera proiettata "vicina" e con ndcZ < label.ndcZ allora la sfera è davanti -> nascondi etichetta
+            let occluded = false;
+            const labelNDCz = v.z;
+            for (let i = 0; i < projectedSpheres.length; i++) {
+              const ps = projectedSpheres[i];
+              // se la sfera è fuori dallo schermo possiamo saltarla
+              if (ps.sx < -100 || ps.sx > container.clientWidth + 100 || ps.sy < -100 || ps.sy > container.clientHeight + 100) continue;
+              // distanza in pixel tra proiezioni
+              const dx = ps.sx - lx;
+              const dy = ps.sy - ly;
+              const distPx = Math.sqrt(dx*dx + dy*dy);
+              // se la sfera è abbastanza vicina nello schermo e si trova "davanti" (ndc z minore)
+              if (distPx <= OCCLUSION_PIXEL_THRESHOLD && ps.ndcZ < labelNDCz) {
+                occluded = true;
+                break;
+              }
+            }
 
-            // nascondi se fuori frustum (semplice stima con posizione proiettata)
-            const projected = sp.position.clone().project(camera);
-            if (projected.z < -1 || projected.z > 1) {
-              sp.visible = false;
+            // Applichiamo nascondi o mostra con transizione
+            if (occluded) {
+              // opzione: nascondo completamente
+              label.el.style.opacity = '0';
+              // oppure per debug: label.el.style.opacity = '0.35';
             } else {
-              sp.visible = true;
+              label.el.style.opacity = '1';
             }
           }
 
-          requestAnimationFrame(updateLabelSprites);
+          requestAnimationFrame(updateLabels);
         }
 
-        // Avvia l'aggiornamento (loop)
-        updateLabelSprites();
+        // Avvia loop etichette
+        updateLabels();
 
-        console.log('Parallelepipedo e etichette (sprite 3D) aggiunti con successo.');
+        console.log('Parallelepipedo e etichette DOM aggiunti (con occlusione approssimata).');
 
       } catch (err) {
         console.error('Errore nel callback parallelepipedo:', err);
