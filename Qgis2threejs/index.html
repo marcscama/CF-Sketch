@@ -123,8 +123,7 @@ var container = document.getElementById("view"),
     gui = Q3D.gui;
 
 app.init(container);       // initialize viewer
-
-// ---------- SOSTITUISCI qui la chiamata app.loadSceneFile con la versione che chiama il callback pulito ----------
+// Sostituisci SOLO il contenuto (senza <script> wrapper) nel blocco dove hai messo il commento
 app.loadSceneFile("./data/index/scene.js",
   function(scene) {
     // scene file loaded
@@ -134,7 +133,6 @@ app.loadSceneFile("./data/index/scene.js",
     // all relevant files have been loaded -> qui la scena è pronta
     try {
       const THREE = window.THREE;
-      // preferisci app.scene se presente
       const threeScene = (scene && scene.isScene) ? scene : (app && app.scene) || window.scene;
       const camera = (app && app.camera) || window.camera || (window.viewer && viewer.camera);
       const renderer = (app && app.renderer) || window.renderer || (window.viewer && viewer.renderer);
@@ -146,15 +144,14 @@ app.loadSceneFile("./data/index/scene.js",
         return;
       }
 
-      // se DTM non esiste stop (ma tu hai detto che il layer si chiama esattamente "DTM")
       const dtm = threeScene.getObjectByName('DTM');
       if (!dtm) {
-        console.warn('DTM non trovato nella scena (cercato con getObjectByName("DTM")).');
+        console.warn('DTM non trovato nella scena (getObjectByName("DTM")).');
         return;
       }
       console.log('DTM trovato:', dtm.name);
 
-      // aggiungiamo stile etichette (solo se non esiste)
+      // crea lo stile etichette se serve
       if (!document.getElementById('label2d-style')) {
         const s = document.createElement('style');
         s.id = 'label2d-style';
@@ -175,7 +172,7 @@ app.loadSceneFile("./data/index/scene.js",
         document.head.appendChild(s);
       }
 
-      // rendi DTM sempre visibile (semi-trasparente)
+      // make DTM always visible
       dtm.traverse(n => {
         if (n.isMesh) {
           const mats = Array.isArray(n.material) ? n.material : [n.material];
@@ -192,7 +189,7 @@ app.loadSceneFile("./data/index/scene.js",
         }
       });
 
-      // parametri
+      // parallelepipedo params
       const DEPTH = 10000;
       const STEP = 1000;
       const OFFSET_PX = 30;
@@ -200,7 +197,7 @@ app.loadSceneFile("./data/index/scene.js",
       // bbox DTM
       const bb = new THREE.Box3().setFromObject(dtm);
 
-      // scegli asse verticale come min dimensione del bbox globale
+      // determina asse verticale
       const totalBbox = new THREE.Box3().setFromObject(threeScene);
       const totalSize = new THREE.Vector3(); totalBbox.getSize(totalSize);
       let vertIndex = 1;
@@ -208,15 +205,13 @@ app.loadSceneFile("./data/index/scene.js",
       else if (totalSize.z <= totalSize.x && totalSize.z <= totalSize.y) vertIndex = 2;
       const axes2 = [0,1,2].filter(i => i !== vertIndex);
 
-      // punto in basso a destra (2D): max su axes2[0], min su axes2[1]
+      // corner basso-destra (2D)
       const maxA = bb.max.getComponent(axes2[0]);
       const minB = bb.min.getComponent(axes2[1]);
 
-      // superficie Z = bb.max sul vertIndex
       const topZ = bb.max.getComponent(vertIndex);
       const bottomZ = topZ - DEPTH;
 
-      // top corners (0=basso-destra,1=alto-destra,2=alto-sin,3=basso-sin)
       const topCorners = [
         new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ),
         new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], bb.max.getComponent(axes2[1])).setComponent(vertIndex, topZ),
@@ -225,7 +220,6 @@ app.loadSceneFile("./data/index/scene.js",
       ];
       const bottomCorners = topCorners.map(c => c.clone().setComponent(vertIndex, bottomZ));
 
-      // helper per linee
       const matLine = new THREE.LineBasicMaterial({ color: 0x000000 });
       function addLine(p1, p2) {
         const geom = new THREE.BufferGeometry().setFromPoints([p1.clone(), p2.clone()]);
@@ -234,18 +228,15 @@ app.loadSceneFile("./data/index/scene.js",
         return l;
       }
 
-      // disegna contorni (top, bottom, verticali)
       addLine(topCorners[0], topCorners[1]); addLine(topCorners[1], topCorners[2]);
       addLine(topCorners[2], topCorners[3]); addLine(topCorners[3], topCorners[0]);
       addLine(bottomCorners[0], bottomCorners[1]); addLine(bottomCorners[1], bottomCorners[2]);
       addLine(bottomCorners[2], bottomCorners[3]); addLine(bottomCorners[3], bottomCorners[0]);
       for (let i = 0; i < 4; i++) addLine(topCorners[i], bottomCorners[i]);
 
-      // etichette solo sulla colonna basso-destra (topCorners[0] -> bottomCorners[0])
+      // labels on bottom-right column
       const labels = [];
       const cornerTop = topCorners[0].clone();
-
-      // direzione outward per offset
       const centerFoot = new THREE.Vector3();
       centerFoot.setComponent(axes2[0], (bb.max.getComponent(axes2[0]) + bb.min.getComponent(axes2[0])) / 2);
       centerFoot.setComponent(axes2[1], (bb.max.getComponent(axes2[1]) + bb.min.getComponent(axes2[1])) / 2);
@@ -268,7 +259,6 @@ app.loadSceneFile("./data/index/scene.js",
         labels.push({ el: div, pos: posOut.clone() });
       }
 
-      // update loop etichette
       (function updateLabels() {
         requestAnimationFrame(updateLabels);
         try {
