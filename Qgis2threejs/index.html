@@ -254,84 +254,31 @@ try {
         const STEP = 1000;   // Intervallo tra le etichette
         const OFFSET_PX = 30; // Offset per le etichette
 
-        // Il livello 0 metri deve corrispondere al punto in basso a destra della mappa
-        // Per una mappa vista dall'alto (DTM), il "livello 0" corrisponde alla quota minima del DTM
-        const baseZ = minZ; // Il livello 0 è la quota minima del DTM
-        const topZ = maxZ; // La quota massima del DTM
+        // Il livello 0 metri è z=0 nel sistema di coordinate
+        const referenceZ = 0; // Livello 0 metri corrisponde a z=0
 
-        // Ma se vogliamo che il parallelepipedo parta dalla base del DTM e vada verso il basso,
-        // dobbiamo considerare che il livello 0 è alla base del DTM, e il parallelepipedo va verso il basso
-        // Quindi:
-        // - La parte superiore del parallelepipedo è alla quota massima del DTM (maxZ)
-        // - La parte inferiore è a maxZ - DEPTH
+        // Il parallelepipedo parte dal livello 0 metri (referenceZ) e va verso il basso
+        const topZParallelepiped = referenceZ;
+        const bottomZParallelepiped = referenceZ - DEPTH;
 
-        // Ma secondo la richiesta, il livello 0 metri deve corrispondere al punto in basso a destra
-        // della mappa (DTM). Quindi dobbiamo interpretare correttamente cosa si intende per "livello 0 metri".
+        // Ma il DTM ha una quota minima di -102 metri, quindi dobbiamo assicurarci che il parallelepipedo
+        // sia posizionato correttamente rispetto al DTM.
 
-        // Interpretazione: il "livello 0 metri" è la quota minima del DTM (poiché il DTM è una superficie,
-        // la sua quota minima può essere considerata il livello di riferimento)
-        const referenceZ = minZ; // Livello 0 metri = quota minima del DTM
-
-        // Il parallelepipedo deve partire dal livello 0 metri (referenceZ) e scendere fino a referenceZ - DEPTH
-        const bottomZ = referenceZ - DEPTH;
-        const topZParallelepiped = referenceZ; // Il "top" del parallelepipedo è al livello 0 metri
-        // Ma questo non ha senso, perché il parallelepipedo dovrebbe scendere sotto il DTM.
-        // Forse intendevamo che il livello 0 metri è il piano di riferimento (quota 0),
-        // e il DTM si trova sopra questo piano.
-
-        // Cerchiamo di capire meglio:
-        // Il DTM è una superficie 3D che rappresenta la topografia.
-        // Il "livello 0 metri" potrebbe essere:
-        // 1. Il piano z=0 nel sistema di coordinate (ma il DTM potrebbe essere sopra o sotto questo piano)
-        // 2. Il punto più basso del DTM (minZ)
-        // 3. Il piano che passa per il punto in basso a destra del DTM
-
-        // Dalla richiesta: "il parallelepipedo... il cui livello 0 metri è il punto in basso a destra della mappa"
-        // Questo suggerisce che il livello 0 metri è la quota del punto in basso a destra del DTM.
-
-        // Quindi:
-        // 1. Troviamo il punto in basso a destra del DTM (minA, minB, ?)
-        // Per una superficie 2D vista dall'alto, il "basso a destra" è:
-        // - max dell'asse X (se X è orizzontale)
-        // - min dell'asse Y (se Y è orizzontale)
-        // - la Z di quel punto
-
-        // Otteniamo la quota Z del punto in basso a destra del DTM
-        const bottomRightPoint = new THREE.Vector3();
-        bottomRightPoint.setComponent(axes2[0], maxA);
-        bottomRightPoint.setComponent(axes2[1], minB);
-
-        // Ma abbiamo bisogno della Z di quel punto. Per un mesh, dobbiamo trovare il vertice corrispondente.
-        // Per una superficie, possiamo usare la quota al punto (maxA, minB)
-        // Ma poiché il DTM è una mesh, possiamo usare un raycaster per trovare la quota in quel punto,
-        // oppure assumere che la quota minima (minZ) rappresenti il livello 0 metri.
-
-        // Per semplicità, useremo minZ come riferimento per il livello 0 metri,
-        // ma dobbiamo trovare la Z esatta nel punto in basso a destra.
-
-        // Per trovare la Z esatta nel punto (maxA, minB):
-        // 1. Creiamo un raggio verticale in quel punto
-        // 2. Intersechiamo con la mesh del DTM per trovare la quota
-
-        // Ma questo potrebbe essere complesso. Alternativa:
-        // Usare minZ come livello di riferimento (livello 0 metri)
-        // Oppure assumere che il livello 0 metri sia la quota media del DTM
-
-        // Per ora, assumiamo che il livello 0 metri sia la quota minima del DTM (minZ)
-        const referenceLevel = minZ; // Livello 0 metri = quota minima del DTM
-        const topZParallelepiped = referenceLevel; // Il "top" del parallelepipedo è al livello 0 metri
-        const bottomZParallelepiped = referenceLevel - DEPTH; // Profondità sotto il livello 0 metri
+        // Il parallelepipedo deve avere:
+        // - Il livello superiore (topZParallelepiped) a z=0
+        // - Il livello inferiore (bottomZParallelepiped) a z=-DEPTH
+        // - La base del parallelepipedo deve corrispondere alla superficie del DTM
 
         // Definiamo i vertici del parallelepipedo
-        const topCornersCorrect = [
-          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZParallelepiped), // angolo in basso a destra (che sarà il livello 0)
+        const topCorners = [
+          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZParallelepiped), // angolo in basso a destra (livello 0)
           new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZParallelepiped), // angolo in basso a sinistra
           new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZParallelepiped), // angolo in alto a sinistra
           new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], minB).setComponent(vertIndex, topZParallelepiped)  // angolo in alto a destra
         ];
 
-        // Vertici inferiori del parallelepipedo (a bottomZParallelepiped)
-        const bottomCorners = topCornersCorrect.map(c => c.clone().setComponent(vertIndex, bottomZParallelepiped));
+        // Vertici inferiori del parallelepipedo
+        const bottomCorners = topCorners.map(c => c.clone().setComponent(vertIndex, bottomZParallelepiped));
 
         // Materiale per le linee del parallelepipedo
         const matLine = new THREE.LineBasicMaterial({
@@ -354,7 +301,7 @@ try {
 
         // Lati superiori (orizzontali)
         for (let i = 0; i < 4; i++) {
-          addLine(topCornersCorrect[i], topCornersCorrect[(i+1)%4]);
+          addLine(topCorners[i], topCorners[(i+1)%4]);
         }
 
         // Lati inferiori (orizzontali)
@@ -364,19 +311,15 @@ try {
 
         // Lati verticali
         for (let i = 0; i < 4; i++) {
-          addLine(topCornersCorrect[i], bottomCorners[i]);
+          addLine(topCorners[i], bottomCorners[i]);
         }
 
         // Etichette sulla colonna in alto a destra
         const labels = [];
 
-        // Il punto in alto a destra è topCornersCorrect[3] (perché abbiamo definito i vertici in ordine orario)
-        const topRightCorner = topCornersCorrect[3].clone(); // angolo in alto a destra
-        const bottomRightCorner = bottomCorners[3].clone(); // angolo in basso a destra
-
-        // La direzione verticale è data dall'asse verticale
-        // Per posizionare le etichette, dobbiamo trovare un punto leggermente dentro rispetto al bordo
-        // Possiamo usare una direzione che va dal centro verso l'angolo
+        // Il punto in alto a destra è topCorners[3]
+        const topRightCorner = topCorners[3].clone();
+        const bottomRightCorner = bottomCorners[3].clone();
 
         // Calcola il centro della base (proiezione 2D)
         const centerFoot = new THREE.Vector3();
@@ -394,6 +337,9 @@ try {
         dirOut.setComponent(vertIndex, 0);
         dirOut.normalize();
 
+        // Direzione verso l'interno per posizionare le etichette
+        const dirIn = dirOut.clone().negate();
+
         // Calcola la dimensione del footprint (base) per l'offset delle etichette
         const footprintSize = Math.max(
           bb.getSize(new THREE.Vector3()).getComponent(axes2[0]),
@@ -401,11 +347,6 @@ try {
         );
 
         const labelOffset = OFFSET_PX * 0.01 * footprintSize;
-
-        // Posizione delle etichette: lungo la colonna verticale passante per l'angolo in alto a destra
-        // Ma dobbiamo posizionarle all'interno del parallelepipedo, non all'esterno
-        // Quindi usiamo una direzione verso l'interno (opposta a dirOut)
-        const dirIn = dirOut.clone().negate();
 
         // Crea le etichette ogni STEP metri lungo la colonna verticale
         for (let d = 0; d <= DEPTH; d += STEP) {
@@ -418,7 +359,7 @@ try {
           const div = document.createElement('div');
           div.className = 'label2d';
           div.textContent = `-${d} m`;
-          div.style.zIndex = '1000'; // Assicurati che le etichette siano sopra tutto
+          div.style.zIndex = '1000';
           document.body.appendChild(div);
 
           // Salva il punto 3D e l'elemento DOM per l'aggiornamento
@@ -448,7 +389,7 @@ try {
             // Ignora gli errori di aggiornamento delle etichette
           }
         }
-        updateLabels(); // Avvia il ciclo di aggiornamento
+        updateLabels();
 
         console.log('Parallelepipedo e etichette aggiunti con successo.');
 
