@@ -310,25 +310,23 @@ try {
         const labels = [];
 
         // Il punto in alto a destra è topCorners[3]
-        const topRightCorner = topCorners[3].clone(); // angolo in alto a destra
-        const bottomRightCorner = bottomCorners[3].clone(); // angolo in basso a destra
+        const topRightCorner = topCorners[3].clone();
+        const bottomRightCorner = bottomCorners[3].clone();
 
-        // Per allineare le etichette alla colonna verticale, dobbiamo posizionarle lungo la linea verticale
-        // che va dal topRightCorner al bottomRightCorner, ma leggermente spostate verso l'interno
-        // per evitare che siano esattamente sul bordo.
+        // Ora, invece di spostare le etichette verso l'interno, le posizioniamo esattamente sull'asse verticale
+        // ma con un piccolo offset per la leggibilità (solo in direzione X/Y, non Z)
 
-        // Calcoliamo la direzione della colonna verticale (dovrebbe essere verticale, ma verifichiamo)
+        // Calcoliamo la direzione lungo l'asse verticale (per riferimento)
         const verticalDir = new THREE.Vector3();
-        verticalDir.setComponent(vertIndex, -1); // Verso il basso (da topZ a bottomZ)
+        verticalDir.setComponent(vertIndex, -1); // Verso il basso
 
-        // Per posizionare le etichette all'interno, dobbiamo trovare una direzione che va dal centro verso il bordo
-        // Calcoliamo il centro della base (proiezione 2D)
+        // Per un piccolo offset orizzontale (opzionale, per evitare sovrapposizioni con i bordi)
+        // Calcoliamo la direzione dal centro verso l'angolo in alto a destra
         const centerFoot = new THREE.Vector3();
         centerFoot.setComponent(axes2[0], (maxA + minA) / 2);
         centerFoot.setComponent(axes2[1], (maxB + minB) / 2);
         centerFoot.setComponent(vertIndex, 0);
 
-        // Direzione dal centro verso l'angolo in alto a destra (per trovare la direzione verso l'esterno)
         const dirOut = topRightCorner.clone().setComponent(vertIndex, 0).sub(centerFoot.clone().setComponent(vertIndex, 0));
         if (dirOut.lengthSq() < 1e-6) {
           // Se la direzione è quasi nulla, usiamo un vettore arbitrario verso l'esterno
@@ -338,30 +336,29 @@ try {
         dirOut.setComponent(vertIndex, 0);
         dirOut.normalize();
 
-        // Ora, per posizionare le etichette all'interno, dobbiamo spostarle nella direzione opposta (verso l'interno)
-        const dirIn = dirOut.clone().negate();
-
         // Calcola la dimensione del footprint (base) per l'offset delle etichette
         const footprintSize = Math.max(
           bb.getSize(new THREE.Vector3()).getComponent(axes2[0]),
           bb.getSize(new THREE.Vector3()).getComponent(axes2[1])
         );
 
+        // Aggiungi un piccolo offset per evitare che le etichette tocchino il bordo
+        // Questo offset sarà applicato solo agli assi orizzontali
         const labelOffset = OFFSET_PX * 0.01 * footprintSize;
+
+        // Direzione verso l'interno (opposta a dirOut) per un piccolo offset
+        const dirIn = dirOut.clone().negate();
+        const offsetVec = dirIn.clone().multiplyScalar(labelOffset);
+        offsetVec.setComponent(vertIndex, 0); // Mantieni la componente Z a 0
 
         // Crea le etichette ogni STEP metri lungo la colonna verticale
         for (let d = 0; d <= DEPTH; d += STEP) {
-          const z = topZParallelepiped - d;
           // Posizione lungo la colonna verticale (stesso X e Y del topRightCorner, Z variabile)
-          const pos = topRightCorner.clone().setComponent(vertIndex, z);
+          const pos = topRightCorner.clone();
+          pos.setComponent(vertIndex, topZParallelepiped - d);
 
-          // Sposta il punto verso l'interno del parallelepipedo lungo la direzione dirIn
-          // Ma dobbiamo spostarlo solo lungo gli assi orizzontali, non verticalmente
-          const horizontalOffset = dirIn.clone().multiplyScalar(labelOffset);
-          // Non modifichiamo la componente verticale (Z) dell'offset
-          horizontalOffset.setComponent(vertIndex, 0);
-
-          const posIn = pos.clone().add(horizontalOffset);
+          // Aggiungi un piccolo offset orizzontale per evitare che le etichette siano esattamente sul bordo
+          const posWithOffset = pos.clone().add(offsetVec);
 
           const div = document.createElement('div');
           div.className = 'label2d';
@@ -372,7 +369,7 @@ try {
           // Salva il punto 3D e l'elemento DOM per l'aggiornamento
           labels.push({
             el: div,
-            pos: posIn.clone()
+            pos: posWithOffset.clone()
           });
         }
 
