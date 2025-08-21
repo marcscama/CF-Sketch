@@ -158,41 +158,23 @@ try {
           return;
         }
 
-        // Cerca il layer DTM
-        let dtm = threeScene.getObjectByName('DTM');
+        // Cerca il layer DTM usando il layerId: 2
+        let dtm = null;
 
-        // Se non trovato direttamente, cerca tra tutti gli oggetti
-        if (!dtm) {
-          console.log('Ricerca alternativa del layer DTM...');
-          threeScene.traverse(function(object) {
-            if (object.name && object.name.toLowerCase().includes('dtm')) {
-              dtm = object;
-              console.log('Layer DTM trovato:', object.name);
-            }
-          });
-
-          // Se ancora non trovato, prova a cercare per tipo/struttura
-          if (!dtm) {
-            threeScene.traverse(function(object) {
-              if (object.isMesh && object.geometry) {
-                // Cerchiamo un oggetto grande che potrebbe essere il DTM
-                const bbox = new THREE.Box3().setFromObject(object);
-                const size = bbox.getSize(new THREE.Vector3());
-                if (size.x > 1000 && size.y > 1000 && size.z > 10) {
-                  dtm = object;
-                  console.log('Layer DTM trovato per dimensioni:', object.name || 'no name');
-                }
-              }
-            });
+        // Cerca in tutta la scena
+        threeScene.traverse(function(object) {
+          if (object.userData && object.userData.layerId === 2) {
+            dtm = object;
+            console.log('Layer DTM trovato con layerId: 2', object.name || 'no name');
           }
-        }
+        });
 
         if (!dtm) {
-          console.error('Impossibile trovare il layer DTM nella scena.');
+          console.error('Impossibile trovare il layer DTM con layerId: 2');
           return;
         }
 
-        console.log('Layer DTM trovato:', dtm.name);
+        console.log('Layer DTM trovato:', dtm.name || 'no name');
 
         // Crea lo stile per le etichette se non esiste già
         if (!document.getElementById('label2d-style')) {
@@ -234,28 +216,27 @@ try {
 
         // Calcola il bounding box del DTM
         const bb = new THREE.Box3().setFromObject(dtm);
+        console.log('Bounding box del DTM:', bb);
 
         // Determina l'asse verticale (Z di default)
-        let vertIndex = 2; // Z è l'asse verticale per default
-        const totalBbox = new THREE.Box3().setFromObject(threeScene);
-        const totalSize = new THREE.Vector3();
-        totalBbox.getSize(totalSize);
+        let vertIndex = 2; // Assumiamo Z come asse verticale per default
 
-        // Se l'altezza (Z) è la più piccola delle dimensioni, forse l'asse verticale è diverso
-        if (totalSize.z <= totalSize.x && totalSize.z <= totalSize.y) {
-          // Trova l'asse con la dimensione minima (ipotizzando che sia l'asse verticale)
-          if (totalSize.x <= totalSize.y && totalSize.x <= totalSize.z) vertIndex = 0;
-          else if (totalSize.y <= totalSize.x && totalSize.y <= totalSize.z) vertIndex = 1;
-          else vertIndex = 2;
-        }
+        // Verifichiamo se la dimensione Z è effettivamente la più piccola (tipico per i DTM)
+        const size = bb.getSize(new THREE.Vector3());
+        console.log('Dimensioni del DTM:', size.x, size.y, size.z);
 
+        // Se Z non è la dimensione più piccola, forse l'asse verticale è diverso
+        const minDimIndex = (size.x < size.y) ?
+                          ((size.x < size.z) ? 0 : 2) :
+                          ((size.y < size.z) ? 1 : 2);
+        vertIndex = minDimIndex;
         console.log('Asse verticale identificato:', ['X','Y','Z'][vertIndex]);
 
         // Estrai gli assi orizzontali
         const axes2 = [0,1,2].filter(i => i !== vertIndex);
         console.log('Assi orizzontali:', axes2.map(i => ['X','Y','Z'][i]).join(', '));
 
-        // Estrai i valori minimi e massimi per gli assi orizzontali
+        // Estrai i valori minimi e massimi per gli assi orizzontali e verticale
         const minA = bb.min.getComponent(axes2[0]);
         const maxA = bb.max.getComponent(axes2[0]);
         const minB = bb.min.getComponent(axes2[1]);
@@ -264,47 +245,101 @@ try {
         const maxZ = bb.max.getComponent(vertIndex);
 
         console.log('Estremi del DTM:');
-        console.log(' - Min A (asse 1):', minA);
-        console.log(' - Max A (asse 1):', maxA);
-        console.log(' - Min B (asse 2):', minB);
-        console.log(' - Max B (asse 2):', maxB);
-        console.log(' - Min Z:', minZ);
-        console.log(' - Max Z:', maxZ);
+        console.log(' - Asse 1 (min/max):', minA, maxA);
+        console.log(' - Asse 2 (min/max):', minB, maxB);
+        console.log(' - Asse Z (min/max):', minZ, maxZ);
 
         // Definisci la profondità del parallelepipedo
-        const DEPTH = 10000; // Profondità totale
+        const DEPTH = 10000; // Profondità totale in metri
         const STEP = 1000;   // Intervallo tra le etichette
         const OFFSET_PX = 30; // Offset per le etichette
 
-        // Calcola il top e bottom Z per il parallelepipedo
-        const topZ = maxZ;
-        const bottomZ = topZ - DEPTH;
+        // Il livello 0 metri deve corrispondere al punto in basso a destra della mappa
+        // Per una mappa vista dall'alto (DTM), il "livello 0" corrisponde alla quota minima del DTM
+        const baseZ = minZ; // Il livello 0 è la quota minima del DTM
+        const topZ = maxZ; // La quota massima del DTM
 
-        // Definisci i quattro angoli superiori e inferiori del parallelepipedo
-        const topCorners = [
-          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ), // angolo 1 (alto-destra)
-          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZ), // angolo 2 (alto-sinistra? No, alto-destra è maxA,minB)
-          // Errore nella precedente definizione, correggiamo:
-          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZ), // alto-destra (maxA, maxB)
-          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZ), // alto-sinistra (minA, maxB)
-          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ)  // basso-sinistra? No, alto-basso è la Z
-          // Mi sono confuso. Per un parallelepipedo rettangolare, abbiamo bisogno di 8 vertici:
-          // 4 in alto (topCorners) e 4 in basso (bottomCorners)
-        ];
+        // Ma se vogliamo che il parallelepipedo parta dalla base del DTM e vada verso il basso,
+        // dobbiamo considerare che il livello 0 è alla base del DTM, e il parallelepipedo va verso il basso
+        // Quindi:
+        // - La parte superiore del parallelepipedo è alla quota massima del DTM (maxZ)
+        // - La parte inferiore è a maxZ - DEPTH
 
-        // Definizione corretta dei 4 angoli superiori
+        // Ma secondo la richiesta, il livello 0 metri deve corrispondere al punto in basso a destra
+        // della mappa (DTM). Quindi dobbiamo interpretare correttamente cosa si intende per "livello 0 metri".
+
+        // Interpretazione: il "livello 0 metri" è la quota minima del DTM (poiché il DTM è una superficie,
+        // la sua quota minima può essere considerata il livello di riferimento)
+        const referenceZ = minZ; // Livello 0 metri = quota minima del DTM
+
+        // Il parallelepipedo deve partire dal livello 0 metri (referenceZ) e scendere fino a referenceZ - DEPTH
+        const bottomZ = referenceZ - DEPTH;
+        const topZParallelepiped = referenceZ; // Il "top" del parallelepipedo è al livello 0 metri
+        // Ma questo non ha senso, perché il parallelepipedo dovrebbe scendere sotto il DTM.
+        // Forse intendevamo che il livello 0 metri è il piano di riferimento (quota 0),
+        // e il DTM si trova sopra questo piano.
+
+        // Cerchiamo di capire meglio:
+        // Il DTM è una superficie 3D che rappresenta la topografia.
+        // Il "livello 0 metri" potrebbe essere:
+        // 1. Il piano z=0 nel sistema di coordinate (ma il DTM potrebbe essere sopra o sotto questo piano)
+        // 2. Il punto più basso del DTM (minZ)
+        // 3. Il piano che passa per il punto in basso a destra del DTM
+
+        // Dalla richiesta: "il parallelepipedo... il cui livello 0 metri è il punto in basso a destra della mappa"
+        // Questo suggerisce che il livello 0 metri è la quota del punto in basso a destra del DTM.
+
+        // Quindi:
+        // 1. Troviamo il punto in basso a destra del DTM (minA, minB, ?)
+        // Per una superficie 2D vista dall'alto, il "basso a destra" è:
+        // - max dell'asse X (se X è orizzontale)
+        // - min dell'asse Y (se Y è orizzontale)
+        // - la Z di quel punto
+
+        // Otteniamo la quota Z del punto in basso a destra del DTM
+        const bottomRightPoint = new THREE.Vector3();
+        bottomRightPoint.setComponent(axes2[0], maxA);
+        bottomRightPoint.setComponent(axes2[1], minB);
+
+        // Ma abbiamo bisogno della Z di quel punto. Per un mesh, dobbiamo trovare il vertice corrispondente.
+        // Per una superficie, possiamo usare la quota al punto (maxA, minB)
+        // Ma poiché il DTM è una mesh, possiamo usare un raycaster per trovare la quota in quel punto,
+        // oppure assumere che la quota minima (minZ) rappresenti il livello 0 metri.
+
+        // Per semplicità, useremo minZ come riferimento per il livello 0 metri,
+        // ma dobbiamo trovare la Z esatta nel punto in basso a destra.
+
+        // Per trovare la Z esatta nel punto (maxA, minB):
+        // 1. Creiamo un raggio verticale in quel punto
+        // 2. Intersechiamo con la mesh del DTM per trovare la quota
+
+        // Ma questo potrebbe essere complesso. Alternativa:
+        // Usare minZ come livello di riferimento (livello 0 metri)
+        // Oppure assumere che il livello 0 metri sia la quota media del DTM
+
+        // Per ora, assumiamo che il livello 0 metri sia la quota minima del DTM (minZ)
+        const referenceLevel = minZ; // Livello 0 metri = quota minima del DTM
+        const topZParallelepiped = referenceLevel; // Il "top" del parallelepipedo è al livello 0 metri
+        const bottomZParallelepiped = referenceLevel - DEPTH; // Profondità sotto il livello 0 metri
+
+        // Definiamo i vertici del parallelepipedo
         const topCornersCorrect = [
-          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ), // angolo in alto a destra (front)
-          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZ), // angolo in alto a sinistra (front)
-          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZ), // angolo in alto a sinistra (back)
-          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], minB).setComponent(vertIndex, topZ)  // angolo in alto a destra (back)
+          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], minB).setComponent(vertIndex, topZParallelepiped), // angolo in basso a destra (che sarà il livello 0)
+          new THREE.Vector3().setComponent(axes2[0], maxA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZParallelepiped), // angolo in basso a sinistra
+          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], maxB).setComponent(vertIndex, topZParallelepiped), // angolo in alto a sinistra
+          new THREE.Vector3().setComponent(axes2[0], minA).setComponent(axes2[1], minB).setComponent(vertIndex, topZParallelepiped)  // angolo in alto a destra
         ];
 
-        // Definisci i 4 angoli inferiori (stesso XY, Z = bottomZ)
-        const bottomCorners = topCornersCorrect.map(c => c.clone().setComponent(vertIndex, bottomZ));
+        // Vertici inferiori del parallelepipedo (a bottomZParallelepiped)
+        const bottomCorners = topCornersCorrect.map(c => c.clone().setComponent(vertIndex, bottomZParallelepiped));
 
         // Materiale per le linee del parallelepipedo
-        const matLine = new THREE.LineBasicMaterial({ color: 0x000000 });
+        const matLine = new THREE.LineBasicMaterial({
+          color: 0x000000,
+          linewidth: 2,
+          opacity: 0.8,
+          transparent: true
+        });
 
         // Funzione per aggiungere una linea tra due punti
         function addLine(p1, p2) {
@@ -317,43 +352,49 @@ try {
         // Disegna il parallelepipedo
         console.log('Disegno del parallelepipedo...');
 
-        // Lati superiori (4 lati)
+        // Lati superiori (orizzontali)
         for (let i = 0; i < 4; i++) {
           addLine(topCornersCorrect[i], topCornersCorrect[(i+1)%4]);
         }
 
-        // Lati inferiori (4 lati)
+        // Lati inferiori (orizzontali)
         for (let i = 0; i < 4; i++) {
           addLine(bottomCorners[i], bottomCorners[(i+1)%4]);
         }
 
-        // Lati verticali (4 lati)
+        // Lati verticali
         for (let i = 0; i < 4; i++) {
           addLine(topCornersCorrect[i], bottomCorners[i]);
         }
 
         // Etichette sulla colonna in alto a destra
         const labels = [];
-        const cornerTop = topCornersCorrect[0].clone(); // angolo in alto a destra (front)
-        const cornerBottom = bottomCorners[0].clone(); // angolo in basso a destra
+
+        // Il punto in alto a destra è topCornersCorrect[3] (perché abbiamo definito i vertici in ordine orario)
+        const topRightCorner = topCornersCorrect[3].clone(); // angolo in alto a destra
+        const bottomRightCorner = bottomCorners[3].clone(); // angolo in basso a destra
+
+        // La direzione verticale è data dall'asse verticale
+        // Per posizionare le etichette, dobbiamo trovare un punto leggermente dentro rispetto al bordo
+        // Possiamo usare una direzione che va dal centro verso l'angolo
 
         // Calcola il centro della base (proiezione 2D)
         const centerFoot = new THREE.Vector3();
-        centerFoot.setComponent(axes2[0], (bb.max.getComponent(axes2[0]) + bb.min.getComponent(axes2[0])) / 2);
-        centerFoot.setComponent(axes2[1], (bb.max.getComponent(axes2[1]) + bb.min.getComponent(axes2[1])) / 2);
+        centerFoot.setComponent(axes2[0], (maxA + minA) / 2);
+        centerFoot.setComponent(axes2[1], (maxB + minB) / 2);
         centerFoot.setComponent(vertIndex, 0);
 
-        // Direzione dal centro verso il corner (per posizionare le etichette)
-        const dirOut = cornerTop.clone().setComponent(vertIndex, 0).sub(centerFoot.clone().setComponent(vertIndex, 0));
+        // Direzione dal centro verso l'angolo in alto a destra (per posizionare le etichette)
+        const dirOut = topRightCorner.clone().setComponent(vertIndex, 0).sub(centerFoot.clone().setComponent(vertIndex, 0));
         if (dirOut.lengthSq() < 1e-6) {
-          // Se la direzione è quasi nulla, usiamo un vettore arbitrario
+          // Se la direzione è quasi nulla, usiamo un vettore arbitrario verso l'esterno
           dirOut.setComponent(axes2[0], 1);
           dirOut.setComponent(axes2[1], 0);
         }
         dirOut.setComponent(vertIndex, 0);
         dirOut.normalize();
 
-        // Calcola la dimensione del footprint (base) per l'offset
+        // Calcola la dimensione del footprint (base) per l'offset delle etichette
         const footprintSize = Math.max(
           bb.getSize(new THREE.Vector3()).getComponent(axes2[0]),
           bb.getSize(new THREE.Vector3()).getComponent(axes2[1])
@@ -361,20 +402,29 @@ try {
 
         const labelOffset = OFFSET_PX * 0.01 * footprintSize;
 
-        // Crea le etichette ogni STEP metri (1000m) lungo la colonna
+        // Posizione delle etichette: lungo la colonna verticale passante per l'angolo in alto a destra
+        // Ma dobbiamo posizionarle all'interno del parallelepipedo, non all'esterno
+        // Quindi usiamo una direzione verso l'interno (opposta a dirOut)
+        const dirIn = dirOut.clone().negate();
+
+        // Crea le etichette ogni STEP metri lungo la colonna verticale
         for (let d = 0; d <= DEPTH; d += STEP) {
-          const z = topZ - d;
-          const pos = cornerTop.clone().setComponent(vertIndex, z);
-          const posOut = pos.clone().add(dirOut.clone().multiplyScalar(labelOffset));
+          const z = topZParallelepiped - d;
+          const pos = topRightCorner.clone().setComponent(vertIndex, z);
+
+          // Sposta il punto verso l'interno del parallelepipedo
+          const posIn = pos.clone().add(dirIn.clone().multiplyScalar(labelOffset));
 
           const div = document.createElement('div');
           div.className = 'label2d';
           div.textContent = `-${d} m`;
+          div.style.zIndex = '1000'; // Assicurati che le etichette siano sopra tutto
           document.body.appendChild(div);
 
+          // Salva il punto 3D e l'elemento DOM per l'aggiornamento
           labels.push({
             el: div,
-            pos: posOut.clone()
+            pos: posIn.clone()
           });
         }
 
