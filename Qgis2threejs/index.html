@@ -306,10 +306,10 @@ try {
           addLine(topCorners[i], bottomCorners[i]);
         }
 
-        // Creazione delle etichette sulla colonna in basso a destra (topCorners[0] -> bottomCorners[0])
-        const labelOffset = LABEL_OFFSET; // offset verso l'esterno
+        // Inizializza l'array delle etichette
+        const labels = [];
 
-        // Calcola il centro del footprint
+        // Creazione delle etichette sulla colonna in basso a destra (topCorners[0] -> bottomCorners[0])
         const centerFoot = new THREE.Vector3();
         centerFoot.setComponent(axes2[0], (maxA + minA) / 2);
         centerFoot.setComponent(axes2[1], (maxB + minB) / 2);
@@ -331,7 +331,7 @@ try {
         // Crea le etichette ogni -1000m lungo la colonna verticale
         for (let d = 1000; d <= DEPTH; d += STEP) {
           const z = topZParallelepiped - d; // negativa
-          const pos = cornerTop.clone().setComponent(vertIndex, z).add(dirOut.clone().multiplyScalar(labelOffset));
+          const pos = cornerTop.clone().setComponent(vertIndex, z).add(dirOut.clone().multiplyScalar(LABEL_OFFSET));
 
           const div = document.createElement('div');
           div.className = 'label2d';
@@ -349,7 +349,7 @@ try {
         // Crea un'etichetta anche per lo 0 (livello del mare)
         {
           const z = topZParallelepiped; // 0 metri
-          const pos = cornerTop.clone().setComponent(vertIndex, z).add(dirOut.clone().multiplyScalar(labelOffset));
+          const pos = cornerTop.clone().setComponent(vertIndex, z).add(dirOut.clone().multiplyScalar(LABEL_OFFSET));
 
           const div = document.createElement('div');
           div.className = 'label2d';
@@ -381,7 +381,7 @@ try {
               L.el.style.top = Math.round(sy) + 'px';
             }
           } catch (e) {
-            // Ignora gli errori di aggiornamento delle etichette
+            console.error('Errore durante l\'aggiornamento delle etichette:', e);
           }
         }
         updateLabels();
