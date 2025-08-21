@@ -22,6 +22,8 @@
   pointer-events:none;
   position:absolute;
   transform:translate(-50%,-50%);
+  /* Aggiungiamo un z-index più basso per le etichette */
+  z-index: 100;
 }
 </style>
 <script src="./threejs/three.min.js"></script>
@@ -193,6 +195,7 @@ try {
             pointer-events:none;
             position:absolute;
             transform:translate(-50%,-50%);
+            z-index: 100;
           }`;
           document.head.appendChild(s);
         }
@@ -213,6 +216,24 @@ try {
             n.renderOrder = 999;
           }
         });
+
+        // Trova il layer dei terremoti (supponiamo che abbia layerId: 0 come nel tuo esempio)
+        let earthquakesLayer = null;
+        threeScene.traverse(function(object) {
+          if (object.userData && object.userData.layerId === 0) {
+            earthquakesLayer = object;
+            console.log('Layer terremoti trovato con layerId: 0', object.name || 'no name');
+          }
+        });
+
+        // Se troviamo il layer dei terremoti, impostiamo un renderOrder alto per le sfere
+        if (earthquakesLayer) {
+          earthquakesLayer.traverse(n => {
+            if (n.isMesh) {
+              n.renderOrder = 2000; // Imposta un renderOrder alto per le sfere dei terremoti
+            }
+          });
+        }
 
         // Calcola il bounding box del DTM
         const bb = new THREE.Box3().setFromObject(dtm);
@@ -336,7 +357,7 @@ try {
           const div = document.createElement('div');
           div.className = 'label2d';
           div.textContent = `-${d} m`;
-          div.style.zIndex = '1000';
+          div.style.zIndex = '100'; // z-index più basso per le etichette
           document.body.appendChild(div);
 
           // Salva il punto 3D e l'elemento DOM per l'aggiornamento
@@ -354,7 +375,7 @@ try {
           const div = document.createElement('div');
           div.className = 'label2d';
           div.textContent = `0 m`;
-          div.style.zIndex = '1000';
+          div.style.zIndex = '100'; // z-index più basso per le etichette
           document.body.appendChild(div);
 
           // Salva il punto 3D e l'elemento DOM per l'aggiornamento
