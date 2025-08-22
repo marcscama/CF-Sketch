@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Terremoti nei Campi Flegrei dal 2005 al 07-2025, con MD>=2 test3</title>
+<title>Terremoti nei Campi Flegrei dal 2005 al 07-2025, con MD>=2 test4</title>
 <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 <base target="_blank">
 <link rel="stylesheet" type="text/css" href="./Qgis2threejs.css">
@@ -310,15 +310,29 @@ try {
         function updatePointer(){ const sz = mode==='eraser'? parseInt(eraserSizeInput.value,10) : parseInt(thicknessInput.value,10); pointer.style.width=Math.max(10,sz)+'px'; pointer.style.height=Math.max(10,sz)+'px'; pointer.classList.toggle('eraser', mode==='eraser'); }
         updatePointer();
         function makeLineObject(points, color, thickness){
-          if (!(THREE_.Line2 && THREE_.LineGeometry && THREE_.LineMaterial)) throw new Error('Line2 non disponibile');
-          const positions = []; for (const p of points) positions.push(p.x,p.y,p.z);
-          const geom = new THREE_.LineGeometry(); geom.setPositions(positions);
-          const mat = new THREE_.LineMaterial({ color: new THREE_.Color(color).getHex(), linewidth: Math.max(0.0006, thickness/100), transparent:true, opacity:1.0, depthTest:true });
-          mat.resolution = new THREE_.Vector2(renderer.domElement.clientWidth, renderer.domElement.clientHeight);
-          const line = new THREE_.Line2(geom, mat); line.computeLineDistances(); line.scale.set(1,1,1);
+          if (!(THREE.Line2 && THREE.LineGeometry && THREE.LineMaterial)) {
+            console.warn('Line2 non disponibile. Assicurati che tutti i componenti necessari siano caricati.');
+            return null;
+          }
+          console.log('Creating line object with points:', points, 'color:', color, 'thickness:', thickness);
+          const positions = []; for (const p of points) positions.push(p.x, p.y, p.z);
+          console.log('Positions:', positions);
+          const geom = new THREE.LineGeometry(); geom.setPositions(positions);
+          const mat = new THREE.LineMaterial({
+            color: new THREE.Color(color).getHex(),
+            linewidth: Math.max(0.0006, thickness/100),
+            transparent: true,
+            opacity: 1.0,
+            depthTest: true
+          });
+          mat.resolution = new THREE.Vector2(renderer.domElement.clientWidth, renderer.domElement.clientHeight);
+          const line = new THREE.Line2(geom, mat);
+          line.computeLineDistances();
+          line.scale.set(1, 1, 1);
           line.frustumCulled = false; // ensure visible
           line.renderOrder = 1000;
           if (line.material) line.material.needsUpdate = true;
+          console.log('Line object created:', line);
           return { object3d: line, material: mat };
         }
         function addPointToLineObj(lineObj, points){
@@ -329,7 +343,7 @@ try {
           lineObj.object3d.geometry.needsUpdate = true;
         }
         function toScreenPosition(v3){ const v=v3.clone().project(camera); return { x:(v.x+1)*0.5*renderer.domElement.clientWidth, y:(1-v.y)*0.5*renderer.domElement.clientHeight, z:v.z }; }
-        function findNearestLineSegment(mouseX, mouseY, radiusPx){ let best=null, bestDist=Infinity; for (const L of lines){ const pts=L.points; for (let i=0;i<pts.length-1;i++){ const a=toScreenPosition(pts[i]); const b=toScreenPosition(pts[i+1]); const dx=b.x-a.x, dy=b.y-a.y, l2=dx*dx+dy*dy; let t=0; if (l2>1e-6) t=((mouseX-a.x)*dx + (mouseY-a.y)*dy)/l2; t=Math.max(0,Math.min(1,t)); const px=a.x+t*dx, py=a.y+t*dy; const dist=Math.hypot(mouseX-px, mouseY-py); if (dist<bestDist){ bestDist=dist; const cp=new THREE_.Vector3().lerpVectors(pts[i], pts[i+1], t); best={line:L, segIndex:i, segT:t, closestPoint:cp, dist}; } } } if (best && best.dist<=radiusPx) return best; return null; }
+        function findNearestLineSegment(mouseX, mouseY, radiusPx){ let best=null, bestDist=Infinity; for (const L of lines){ const pts=L.points; for (let i=0;i<pts.length-1;i++){ const a=toScreenPosition(pts[i]); const b=toScreenPosition(pts[i+1]); const dx=b.x-a.x, dy=b.y-a.y, l2=dx*dx+dy*dy; let t=0; if (l2>1e-6) t=((mouseX-a.x)*dx + (mouseY-a.y)*dy)/l2; t=Math.max(0,Math.min(1,t)); const px=a.x+t*dx, py=a.y+t*dy; const dist=Math.hypot(mouseX-px, mouseY-py); if (dist<bestDist){ bestDist=dist; const cp=new THREE.Vector3().lerpVectors(pts[i], pts[i+1], t); best={line:L, segIndex:i, segT:t, closestPoint:cp, dist}; } } } if (best && best.dist<=radiusPx) return best; return null; }
         function setHighlight(L){ if (highlighted===L) return; if (highlighted){ try{ highlighted.object3d.material.color.set(highlighted.color); highlighted.object3d.material.linewidth = Math.max(0.0006, highlighted.thickness/100); highlighted.highlighted=false; }catch(e){} } highlighted=L; if (highlighted){ try{ highlighted.object3d.material.color.set(0xFFFF66); highlighted.object3d.material.linewidth = Math.max(0.001, highlighted.thickness/80); highlighted.highlighted=true;}catch(e){} } }
         function clampToParallelepiped(pt){ // clamp a bbox XY e tra bottom/top Z del parallelepipedo
           bb.clampPoint(pt, pt);
@@ -385,7 +399,7 @@ function getRay(clientX, clientY){ const rect=domEl.getBoundingClientRect(); con
         function onPointerDown(ev){ if (ev.button !== 0) return; // only left button
           // debug
           //console.log('pointerdown', 'mode=', mode, 'client=', ev.clientX, ev.clientY);
-          if (!THREE_.Line2) {
+          if (!THREE.Line2) {
             console.warn('Line2 non disponibile al momento del click; ignoro il disegno.');
             return;
           }
@@ -410,7 +424,7 @@ function getRay(clientX, clientY){ const rect=domEl.getBoundingClientRect(); con
         window.addEventListener('resize', ()=>{
           for (const L of lines) if (L.object3d && L.object3d.material && L.object3d.material.resolution) L.object3d.material.resolution.set(renderer.domElement.clientWidth, renderer.domElement.clientHeight);
         });
-        console.log('Line2 ready?', !!(THREE_.Line2 && THREE_.LineGeometry && THREE_.LineMaterial));
+        console.log('Line2 ready?', !!(THREE.Line2 && THREE.LineGeometry && THREE.LineMaterial));
         console.log('Pen & Eraser attivi. Piano disegno bloccato alla vista e clamp nel parallelepipedo.');
       } catch (err) {
         console.error('Errore nel callback parallelepipedo/annotazioni:', err);
