@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Terremoti nei Campi Flegrei dal 2005 al 07-2025, con MD>=2 test4</title>
+<title>Terremoti nei Campi Flegrei dal 2005 al 07-2025, con MD>=2 test6</title>
 <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 <base target="_blank">
 <link rel="stylesheet" type="text/css" href="./Qgis2threejs.css">
@@ -22,13 +22,13 @@
   transform:translate(-50%,-50%);
 }
 /* UI di annotazione (a destra) */
-#drawUI { position: absolute; top: 12px; right: 12px; background: rgba(255,255,255,0.95); border-radius: 10px; padding: 10px 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.18); z-index: 3000; font-family: system-ui, sans-serif; min-width: 220px; }
+#drawUI { position: absolute; top: 12px; right: 12px; background: rgba(255,255,255,0.95); border-radius: 10px; padding: 10px 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.18); z-index: 3000; font-family: system-ui, sans-serif; width: 150px; }
 #drawUI h3 { margin: 0 0 8px 0; font-size: 14px; font-weight: 700; }
 .ui-row { display:flex; align-items:center; gap:8px; margin:8px 0; }
-.tool { padding:6px 10px; border-radius:8px; border:1px solid #c6c6c6; background:#f7f7f7; cursor:pointer; font-weight:600; }
+.tool { padding:6px 10px; border-radius:8px; border:1px solid #c6c6c6; background:#f7f7f7; cursor:pointer; font-weight:600; font-size: 12px; }
 .tool.active { background:#0a84ff; color:#fff; border-color:#066fd6; }
 input[type=color]{ width:36px; height:28px; padding:0; border:none; }
-input[type=range]{ width:130px; }
+input[type=range]{ width:80px; }
 #pointer { position: fixed; pointer-events: none; z-index: 3500; width: 18px; height: 18px; border-radius: 50%; transform: translate(-50%,-50%); border:2px solid rgba(0,0,0,0.65); background: rgba(255,255,255,0.2); }
 #pointer.eraser { border:2px dashed rgba(0,0,0,0.65); background: rgba(255,255,255,0.1); }
 </style>
@@ -320,7 +320,7 @@ try {
           const geom = new THREE.LineGeometry(); geom.setPositions(positions);
           const mat = new THREE.LineMaterial({
             color: new THREE.Color(color).getHex(),
-            linewidth: Math.max(0.0006, thickness/100),
+            linewidth: Math.max(0.0006, thickness/20), // Modificato il divisore per aumentare lo spessore
             transparent: true,
             opacity: 1.0,
             depthTest: true
@@ -344,7 +344,7 @@ try {
         }
         function toScreenPosition(v3){ const v=v3.clone().project(camera); return { x:(v.x+1)*0.5*renderer.domElement.clientWidth, y:(1-v.y)*0.5*renderer.domElement.clientHeight, z:v.z }; }
         function findNearestLineSegment(mouseX, mouseY, radiusPx){ let best=null, bestDist=Infinity; for (const L of lines){ const pts=L.points; for (let i=0;i<pts.length-1;i++){ const a=toScreenPosition(pts[i]); const b=toScreenPosition(pts[i+1]); const dx=b.x-a.x, dy=b.y-a.y, l2=dx*dx+dy*dy; let t=0; if (l2>1e-6) t=((mouseX-a.x)*dx + (mouseY-a.y)*dy)/l2; t=Math.max(0,Math.min(1,t)); const px=a.x+t*dx, py=a.y+t*dy; const dist=Math.hypot(mouseX-px, mouseY-py); if (dist<bestDist){ bestDist=dist; const cp=new THREE.Vector3().lerpVectors(pts[i], pts[i+1], t); best={line:L, segIndex:i, segT:t, closestPoint:cp, dist}; } } } if (best && best.dist<=radiusPx) return best; return null; }
-        function setHighlight(L){ if (highlighted===L) return; if (highlighted){ try{ highlighted.object3d.material.color.set(highlighted.color); highlighted.object3d.material.linewidth = Math.max(0.0006, highlighted.thickness/100); highlighted.highlighted=false; }catch(e){} } highlighted=L; if (highlighted){ try{ highlighted.object3d.material.color.set(0xFFFF66); highlighted.object3d.material.linewidth = Math.max(0.001, highlighted.thickness/80); highlighted.highlighted=true;}catch(e){} } }
+        function setHighlight(L){ if (highlighted===L) return; if (highlighted){ try{ highlighted.object3d.material.color.set(highlighted.color); highlighted.object3d.material.linewidth = Math.max(0.0006, highlighted.thickness/20); highlighted.highlighted=false; }catch(e){} } highlighted=L; if (highlighted){ try{ highlighted.object3d.material.color.set(0xFFFF66); highlighted.object3d.material.linewidth = Math.max(0.001, highlighted.thickness/10); highlighted.highlighted=true;}catch(e){} } }
         function clampToParallelepiped(pt){ // clamp a bbox XY e tra bottom/top Z del parallelepipedo
           bb.clampPoint(pt, pt);
           const z = pt.getComponent(vertIndex);
@@ -388,10 +388,9 @@ function getRay(clientX, clientY){ const rect=domEl.getBoundingClientRect(); con
           if (drawing && mode==='pen' && currentLine){
             // aggiorna piano di disegno in base alla vista corrente (bloccata per rotazione)
             const dir=new THREE_.Vector3(); camera.getWorldDirection(dir);
-            const ray=new THREE_.Ray(camera.position.clone(), dir.clone());
-            const hit=ray.intersectBox(bb, new THREE_.Vector3());
-            const pointOnPlane = hit? hit : bb.getCenter(new THREE_.Vector3());
-            drawPlane = new THREE_.Plane().setFromNormalAndCoplanarPoint(dir.clone().negate(), pointOnPlane);
+            // Crea un piano perpendicolare alla direzione della camera
+            const center = bb.getCenter(new THREE_.Vector3());
+            drawPlane = new THREE_.Plane().setFromNormalAndCoplanarPoint(dir.clone().negate(), center);
             const rc = getRay(ev.clientX, ev.clientY); const pt=new THREE_.Vector3(); rc.ray.intersectPlane(drawPlane, pt);
             if (pt){ clampToParallelepiped(pt); const last = currentLine.points[currentLine.points.length-1]; if (!last || last.distanceTo(pt) > 0.01){ currentLine.points.push(pt.clone()); addPointToLineObj(currentLine, currentLine.points); } }
           }
@@ -406,10 +405,9 @@ function getRay(clientX, clientY){ const rect=domEl.getBoundingClientRect(); con
           if (mode==='pen'){
             drawing=true; currentLine={ id: nextId++, points: [], color: colorPicker.value, thickness: parseInt(thicknessInput.value,10) };
             const dir=new THREE_.Vector3(); camera.getWorldDirection(dir);
-            const ray=new THREE_.Ray(camera.position.clone(), dir.clone());
-            const hit=ray.intersectBox(bb, new THREE_.Vector3());
-            const pointOnPlane = hit? hit : bb.getCenter(new THREE_.Vector3());
-            drawPlane = new THREE_.Plane().setFromNormalAndCoplanarPoint(dir.clone().negate(), pointOnPlane);
+            // Crea un piano perpendicolare alla direzione della camera
+            const center = bb.getCenter(new THREE_.Vector3());
+            drawPlane = new THREE_.Plane().setFromNormalAndCoplanarPoint(dir.clone().negate(), center);
             const rc = getRay(ev.clientX, ev.clientY); const pt=new THREE_.Vector3(); rc.ray.intersectPlane(drawPlane, pt);
             if (pt){ clampToParallelepiped(pt); currentLine.points.push(pt.clone());
               // add a tiny second point so Line2 can render immediately
