@@ -40,30 +40,50 @@ input[type=range]{ width:130px; }
 <script src="./threejs/OutlineEffect.js"></script>
 <script src="./Qgis2threejs.js"></script>
 
-<!-- IMPORT ESM dei moduli Line2 dal percorso locale ./threejs/lines/ -->
+<!-- IMPORT ESM dei moduli Line2 dal percorso locale ./threejs/lines/ con fallback CDN -->
 <script type="module">
 (async ()=>{
+  const localBase = './threejs/lines/';
+  const cdnBase   = 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/lines/';
+
+  async function tryImportBoth(name){
+    // prova locale
+    try {
+      return await import(localBase + name);
+    } catch (errLocal) {
+      // se fallisce, log e prova CDN
+      console.warn('Import locale fallito:', localBase + name, errLocal);
+      try {
+        return await import(cdnBase + name);
+      } catch (errCdn) {
+        console.error('Import CDN fallito:', cdnBase + name, errCdn);
+        throw errCdn;
+      }
+    }
+  }
+
   try {
-    // importa i moduli ESM (dalla cartella threejs/lines)
-    const geom = await import('./threejs/lines/LineGeometry.js');
-    const mat  = await import('./threejs/lines/LineMaterial.js');
-    const l2   = await import('./threejs/lines/Line2.js');
+    const geomMod = await tryImportBoth('LineGeometry.js');
+    const matMod  = await tryImportBoth('LineMaterial.js');
+    const l2Mod   = await tryImportBoth('Line2.js');
 
-    // aggancia le classi a window.THREE per compatibilità con codice non-module
+    // aggancia alle proprietà THREE globali
     window.THREE = window.THREE || {};
-    window.THREE.LineGeometry = geom.LineGeometry || geom.default || geom.LineSegmentsGeometry || null;
-    window.THREE.LineMaterial = mat.LineMaterial || mat.default || null;
-    window.THREE.Line2 = l2.Line2 || l2.default || null;
+    window.THREE.LineGeometry = geomMod.LineGeometry || geomMod.default || geomMod.LineSegmentsGeometry || null;
+    window.THREE.LineMaterial = matMod.LineMaterial || matMod.default || null;
+    window.THREE.Line2       = l2Mod.Line2 || l2Mod.default || null;
 
-    console.log('Line2 ESM importati e agganciati a window.THREE:', !!window.THREE.Line2, !!window.THREE.LineGeometry, !!window.THREE.LineMaterial);
+    console.log('Line2 importati (local o CDN):', !!window.THREE.Line2, !!window.THREE.LineGeometry, !!window.THREE.LineMaterial);
 
-    // dispatch opzionale per compatibilità
+    // segnala che Line2 è pronta
     window.dispatchEvent(new CustomEvent('three-line2-ready'));
+    if (window.__resolve_line2) window.__resolve_line2();
   } catch (e) {
-    console.error('Import Line2 ESM fallito (controlla ./threejs/lines/):', e);
+    console.error('Import Line2 fallito definitivamente. Controlla ./threejs/lines/ o la connettività CDN.', e);
   }
 })();
 </script>
+
 
 </head>
 <body>
