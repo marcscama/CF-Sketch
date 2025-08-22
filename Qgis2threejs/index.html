@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Terremoti nei Campi Flegrei dal 2005 al 07-2025, con MD>=2 test8</title>
+<title>Terremoti nei Campi Flegrei dal 2005 al 07-2025, con MD>=2 test9</title>
 <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 <base target="_blank">
 <link rel="stylesheet" type="text/css" href="./Qgis2threejs.css">
@@ -525,7 +525,17 @@ try {
           mouse.y = ev.clientY - rect.top;
           pointer.style.left = ev.clientX + 'px';
           pointer.style.top = ev.clientY + 'px';
-
+          
+                if (drawing && currentLine && pt) {
+                  const last = currentLine.points[currentLine.points.length - 1];
+                  if (!last || last.distanceTo(pt) > 0.01) {
+                    currentLine.points.push(pt.clone());
+                    if (currentLine.points.length > 1) {
+                      // 👉 passo solo array valido con almeno 2 punti
+                      addPointToLineObj(currentLine, currentLine.points);
+                    }
+                  }
+                }
           if (mode === 'eraser') {
             const seg = findNearestLineSegment(mouse.x, mouse.y, parseInt(eraserSizeInput.value, 10));
             setHighlight(seg ? seg.line : null);
@@ -571,6 +581,23 @@ try {
         }
 
         function onPointerDown(ev) {
+
+              if (pt) {
+                clampToParallelepiped(pt);
+                currentLine = {
+                  id: nextId++,
+                  points: [pt.clone()],
+                  color: colorPicker.value,
+                  thickness: parseInt(thicknessInput.value, 10)
+                };
+                const obj = makeLineObject(currentLine.points, currentLine.color, currentLine.thickness);
+                currentLine.object3d = obj.object3d;
+                currentLine.material = obj.material;
+                currentLine.opacity = 1.0;
+                threeScene.add(currentLine.object3d);
+                lines.push(currentLine);
+              }
+
           if (ev.button !== 0) return; // solo tasto sinistro
           if (!THREE.Line2) { console.warn('Line2 non disponibile al click; provo fallback THREE.Line.'); }
 
