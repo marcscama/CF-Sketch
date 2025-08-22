@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Terremoti nei Campi Flegrei dal 2005 al 07-2025, con MD>=2</title>
+<title>Terremoti nei Campi Flegrei dal 2005 al 07-2025, con MD>=2 test2</title>
 <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 <base target="_blank">
 <link rel="stylesheet" type="text/css" href="./Qgis2threejs.css">
@@ -338,6 +338,9 @@ try {
           const mat = new THREE_.LineMaterial({ color: new THREE_.Color(color).getHex(), linewidth: Math.max(0.0006, thickness/100), transparent:true, opacity:1.0, depthTest:true });
           mat.resolution = new THREE_.Vector2(renderer.domElement.clientWidth, renderer.domElement.clientHeight);
           const line = new THREE_.Line2(geom, mat); line.computeLineDistances(); line.scale.set(1,1,1);
+          line.frustumCulled = false; // ensure visible
+          line.renderOrder = 1000;
+          if (line.material) line.material.needsUpdate = true;
           return { object3d: line, material: mat };
         }
         function addPointToLineObj(lineObj, points){
@@ -378,11 +381,23 @@ try {
         }
 
         const domEl = renderer.domElement; let mouse={x:0,y:0};
-        domEl.addEventListener('pointermove', onPointerMove); domEl.addEventListener('pointerdown', onPointerDown); domEl.addEventListener('pointerup', onPointerUp);
+// ensure the canvas accepts pointer events
+try { domEl.style.touchAction = domEl.style.touchAction || 'none'; domEl.style.userSelect = 'none'; } catch(e){}
+// attach listeners both on renderer DOM and on container (capture) to maximize chance of catching events
+domEl.addEventListener('pointermove', onPointerMove, {passive:true});
+domEl.addEventListener('pointerdown', onPointerDown, {passive:false, capture:true});
+domEl.addEventListener('pointerup', onPointerUp, {passive:true, capture:true});
+// also on main container (some overlays may intercept events)
+try { container.addEventListener('pointermove', onPointerMove, {passive:true}); container.addEventListener('pointerdown', onPointerDown, {passive:false, capture:true}); container.addEventListener('pointerup', onPointerUp, {passive:true, capture:true}); } catch(e){}
 
-        function getRay(clientX, clientY){ const rect=domEl.getBoundingClientRect(); const ndcX=((clientX-rect.left)/domEl.clientWidth)*2-1; const ndcY=-(((clientY-rect.top)/domEl.clientHeight)*2-1); const rc=new THREE_.Raycaster(); rc.setFromCamera(new THREE_.Vector2(ndcX, ndcY), camera); return rc; }
+// debug helper: show basic event activity
+function debugEvent(evt, tag){ /* uncomment to enable visual debug: console.log(tag, evt.type, evt.clientX, evt.clientY, 'mode=',mode, 'drawing=',drawing); */ }
+
+function getRay(clientX, clientY){ const rect=domEl.getBoundingClientRect(); const ndcX=((clientX-rect.left)/domEl.clientWidth)*2-1; const ndcY=-(((clientY-rect.top)/domEl.clientHeight)*2-1); const rc=new THREE_.Raycaster(); rc.setFromCamera(new THREE_.Vector2(ndcX, ndcY), camera); return rc; }
 
         function onPointerMove(ev){ const rect=domEl.getBoundingClientRect(); mouse.x = ev.clientX - rect.left; mouse.y = ev.clientY - rect.top; pointer.style.left = ev.clientX + 'px'; pointer.style.top = ev.clientY + 'px';
+          // debug
+          //console.log('pointermove', 'mode=', mode, 'drawing=', drawing, 'mouse=', mouse.x, mouse.y);
           if (mode==='eraser'){ const seg=findNearestLineSegment(mouse.x, mouse.y, parseInt(eraserSizeInput.value,10)); setHighlight(seg? seg.line : null); if (drawing) erasePieceAt(mouse.x, mouse.y, parseInt(eraserSizeInput.value,10)); }
           if (drawing && mode==='pen' && currentLine){
             // aggiorna piano di disegno in base alla vista corrente (bloccata per rotazione)
@@ -397,7 +412,9 @@ try {
           }
         }
 
-        function onPointerDown(ev){ if (ev.button !== 0) return; if (mode==='pen'){
+        function onPointerDown(ev){ if (ev.button !== 0) return; // only left button
+          // debug
+          //console.log('pointerdown', 'mode=', mode, 'client=', ev.clientX, ev.clientY);  if (!THREE_.Line2){ console.warn('Line2 non disponibile al momento del click; ignoro il disegno.'); return; } if (mode==='pen'){
             drawing=true; currentLine={ id: nextId++, points: [], color: colorPicker.value, thickness: parseInt(thicknessInput.value,10) };
             const dir=new THREE_.Vector3(); camera.getWorldDirection(dir);
             const ray=new THREE_.Ray(camera.position.clone(), dir.clone());
@@ -405,7 +422,10 @@ try {
             const pointOnPlane = hit? hit : bb.getCenter(new THREE_.Vector3());
             drawPlane = new THREE_.Plane().setFromNormalAndCoplanarPoint(dir.clone().negate(), pointOnPlane);
             const rc = getRay(ev.clientX, ev.clientY); const pt=new THREE_.Vector3(); rc.ray.intersectPlane(drawPlane, pt);
-            if (pt){ clampToParallelepiped(pt); currentLine.points.push(pt.clone()); }
+            if (pt){ clampToParallelepiped(pt); currentLine.points.push(pt.clone());
+              // add a tiny second point so Line2 can render immediately
+              const tiny = pt.clone(); tiny.x += 1e-6; tiny.y += 1e-6; tiny.z += 1e-6; currentLine.points.push(tiny);
+            }
             const obj = makeLineObject(currentLine.points, currentLine.color, currentLine.thickness); currentLine.object3d = obj.object3d; currentLine.material = obj.material; currentLine.opacity = 1.0; threeScene.add(currentLine.object3d); lines.push(currentLine);
           } else if (mode==='eraser'){
             drawing=true; const rect=domEl.getBoundingClientRect(); const mx=ev.clientX-rect.left, my=ev.clientY-rect.top; const done=erasePieceAt(mx,my, parseInt(eraserSizeInput.value,10)); if (done) setHighlight(null);
