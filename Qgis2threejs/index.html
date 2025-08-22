@@ -2,12 +2,11 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Terremoti nei Campi Flegrei — prova2</title>
+<title>Terremoti nei Campi Flegrei dal 2005 al 07-2025, con MD>=2</title>
 <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
 <base target="_blank">
 <link rel="stylesheet" type="text/css" href="./Qgis2threejs.css">
 <style type="text/css">
-/* (stili conservati / UI a destra) */
 #popup, #header, #layerpanel { left: 36px; }
 .label2d {
   padding:2px 6px;
@@ -22,6 +21,7 @@
   position:absolute;
   transform:translate(-50%,-50%);
 }
+/* UI di annotazione (a destra) */
 #drawUI { position: absolute; top: 12px; right: 12px; background: rgba(255,255,255,0.95); border-radius: 10px; padding: 10px 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.18); z-index: 3000; font-family: system-ui, sans-serif; min-width: 220px; }
 #drawUI h3 { margin: 0 0 8px 0; font-size: 14px; font-weight: 700; }
 .ui-row { display:flex; align-items:center; gap:8px; margin:8px 0; }
@@ -33,78 +33,100 @@ input[type=range]{ width:130px; }
 #pointer.eraser { border:2px dashed rgba(0,0,0,0.65); background: rgba(255,255,255,0.1); }
 </style>
 
-<!-- three.js core non-module + Qgis2threejs -->
+<!-- three.js core non-module + controls/effects -->
 <script src="./threejs/three.min.js"></script>
-<!-- Importmap per risolvere il bare specifier "three" verso un module build (CDN) -->
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.165.0/build/three.module.js"
-  }
-}
-</script>
-
-<!-- Dynamic ESM loader: prova i moduli locali ./threejs/lines/, se falliscono prende dal CDN examples/jsm/lines/ -->
-<script type="module">
-(async ()=>{
-  const localBase = './threejs/lines/';
-  const cdnBase   = 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/lines/';
-
-  async function tryImportEither(name){
-    // prova locale prima
-    try {
-      return await import(localBase + name);
-    } catch (errLocal) {
-      console.warn('Import locale fallito:', localBase + name, errLocal);
-    }
-    // poi prova CDN jsm
-    try {
-      return await import(cdnBase + name);
-    } catch (errCdn) {
-      console.error('Import CDN fallito:', cdnBase + name, errCdn);
-      throw errCdn;
-    }
-  }
-
-  try {
-    const geomMod = await tryImportEither('LineGeometry.js');
-    const matMod  = await tryImportEither('LineMaterial.js');
-    const l2Mod   = await tryImportEither('Line2.js');
-
-    // attach to global THREE for non-module code compatibility
-    window.THREE = window.THREE || {};
-    window.THREE.LineGeometry = geomMod.LineGeometry || geomMod.default || geomMod.LineSegmentsGeometry || null;
-    window.THREE.LineMaterial = matMod.LineMaterial || matMod.default || null;
-    window.THREE.Line2       = l2Mod.Line2 || l2Mod.default || null;
-
-    console.log('Line2 importati (locale o CDN):', !!window.THREE.Line2, !!window.THREE.LineGeometry, !!window.THREE.LineMaterial);
-
-    // signal readiness
-    window.dispatchEvent(new CustomEvent('three-line2-ready'));
-    if (window.__resolve_line2) window.__resolve_line2();
-  } catch (e) {
-    console.error('Import Line2 fallito definitivamente. Controlla ./threejs/lines/ o la connettività CDN.', e);
-  }
-})();
-</script>
-
-
-  
 <script src="./threejs/OrbitControls.js"></script>
 <script src="./threejs/ViewHelper.js"></script>
 <script src="./threejs/OutlineEffect.js"></script>
+
+<!-- Line2 (non-module) - local files (ensure these exist in ./threejs/lines/) -->
+<script src="./threejs/lines/LineSegmentsGeometry.js"></script>
+<script src="./threejs/lines/LineSegments2.js"></script>
+<script src="./threejs/lines/LineGeometry.js"></script>
+<script src="./threejs/lines/LineMaterial.js"></script>
+<script src="./threejs/lines/Line2.js"></script>
+
+<!-- Qgis2threejs core (must be loaded after three and Line2 dependencies) -->
 <script src="./Qgis2threejs.js"></script>
-
-
 </head>
 <body>
 <div id="view">
   <div id="northarrow"></div>
   <div id="navigation"></div>
 </div>
-
-<!-- (tutta la UI Qgis2threejs è mantenuta) -->
-<!-- ... popup, header, layerpanel ecc. (assumo invariati) ... -->
+<!-- popup -->
+<div id="popup">
+  <div id="closebtn">&times;</div>
+  <div id="popupbar"></div>
+  <div id="popupbody">
+    <div id="popupcontent"></div>
+    <!-- query result -->
+    <div id="queryresult">
+      <table id="qr_coords_table">
+        <caption>Clicked coordinates <div id="zoomtopoint" class="action-zoom zoombtn"></div></caption>
+        <tr><td id="qr_coords"></td></tr>
+      </table>
+      <table id="qr_layername_table">
+        <caption>Layer <div id="zoomtolayer" class="action-zoom zoombtn"></div></caption>
+        <tr><td id="qr_layername"></td></tr>
+      </table>
+      <table id="qr_attrs_table">
+        <caption>Attributes</caption>
+      </table>
+      <!-- camera actions and measure tool -->
+      <div id="orbitbtn" class="action-btn action-orbit">Orbit</div>
+      <div id="measurebtn" class="action-btn">Measure distance</div>
+    </div>
+    <!-- page info -->
+    <div id="pageinfo">
+      <h1>Current View URL</h1>
+      <div><input id="urlbox" type="text"></div>
+      <h1>Usage</h1>
+      <table id="usage">
+        <tr><td colspan="2" class="star">Mouse</td></tr>
+        <tr><td>Left button + Move</td><td>Orbit</td></tr>
+        <tr><td>Mouse Wheel</td><td>Zoom</td></tr>
+        <tr><td>Right button + Move</td><td>Pan</td></tr>
+        <tr><td colspan="2" class="star">Keys</td></tr>
+        <tr><td>Arrow keys</td><td>Move Horizontally</td></tr>
+        <tr><td>Shift + Arrow keys</td><td>Orbit</td></tr>
+        <tr><td>Ctrl + Arrow keys</td><td>Rotate</td></tr>
+        <tr><td>Shift + Ctrl + Up / Down</td><td>Zoom In / Out</td></tr>
+        <tr><td>L</td><td>Toggle Label Visibility</td></tr>
+        <tr><td>R</td><td>Start / Stop Orbit Animation</td></tr>
+        <tr><td>W</td><td>Wireframe Mode</td></tr>
+        <tr><td>Shift + R</td><td>Reset Camera Position</td></tr>
+        <tr><td>Shift + S</td><td>Save Image</td></tr>
+      </table>
+      <h1>About</h1>
+      <div id="about"><img src="./Qgis2threejs.png">
+        This page was made with <a href="https://www.qgis.org/">QGIS</a> and <a href="https://github.com/minorua/Qgis2threejs">Qgis2threejs</a> plugin (version 2.8).
+        <div>Powered by <a href="https://threejs.org/">three.js</a>
+        <span id="lib_proj4js"> and <a href="https://trac.osgeo.org/proj4js/">Proj4js</a></span>.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- progress bar -->
+<div id="progress"><div id="progressbar"></div></div>
+<!-- menu -->
+<div id="toolbtns">
+  <div id="layerbtn"></div>
+  <div id="animbtn" class="hidden"></div>
+  <div id="infobtn"></div>
+</div>
+<!-- header and footer -->
+<div id="header"></div>
+<div id="footer"></div>
+<!-- layer panel -->
+<div id="layerpanel">
+  <div id="layerlist"></div>
+</div>
+<!-- animation -->
+<div id="narrativebox" class="ef1">
+  <div id="narbody"></div>
+  <div id="nextbtn"></div>
+</div>
 
 <!-- UI Annotazioni (a destra) -->
 <div id="drawUI">
@@ -131,7 +153,7 @@ input[type=range]{ width:130px; }
 <div id="pointer"></div>
 
 <script>
-// ========== CONFIG Qgis2threejs ==========
+// ===================== Configurazione iniziale Qgis2threejs =====================
 Q3D.Config.allVisible = true;
 Q3D.Config.bgColor = 0xffffff;
 Q3D.Config.viewpoint = {
@@ -140,26 +162,25 @@ Q3D.Config.viewpoint = {
 };
 Q3D.Config.localMode = true;
 
-// inizializza viewer
+// Inizializzazione
 var container = document.getElementById("view"),
     app = Q3D.application,
     gui = Q3D.gui;
-try { app.init(container); } catch (error) { console.error('Errore init:', error); }
 
-// === Promise per Line2 readiness (risolta subito se i moduli ESM hanno già impostato window.THREE) ===
-window.line2Ready = new Promise((resolve)=>{ window.__resolve_line2 = resolve; });
-// se è già disponibile, risolvi subito
-if (window.THREE && THREE.Line2 && THREE.LineGeometry && THREE.LineMaterial) {
-  if (window.__resolve_line2) window.__resolve_line2();
+try { app.init(container); } catch (error) {
+  console.error('Errore durante l\'inizializzazione dell\'applicazione:', error);
 }
-// anche risolviamo se il modulo ESM emette l'evento
-window.addEventListener('three-line2-ready', ()=>{ if (window.__resolve_line2) window.__resolve_line2(); }, { once:true });
 
-// Carica la scena (Qgis2threejs)
+// Verifica Line2 (obbligatorio)
+if (!(window.THREE && THREE.Line2 && THREE.LineGeometry && THREE.LineMaterial)) {
+  console.warn('Line2 non trovato. Assicurati che ./threejs/lines/ contenga i file non-module corretti. Alcune funzionalità di disegno saranno disabilitate finché non sono caricate.');
+}
+
+// Caricamento scena
 try {
   app.loadSceneFile("./data/index/scene.js",
     function(scene) {
-      try { app.start(); } catch (error) { console.error('Errore app.start:', error); }
+      try { app.start(); } catch (error) { console.error('Errore durante l\'avvio dell\'applicazione:', error); }
     },
     function(scene) {
       try {
@@ -169,29 +190,51 @@ try {
         const renderer = (app && app.renderer) || window.renderer || (window.viewer && viewer.renderer);
         const controls = (app && app.controls) || window.controls || (function(){ try { return new THREE_.OrbitControls(camera, renderer.domElement); } catch(e){ return null; } })();
 
+        console.log('Callback all files loaded - scene, camera, renderer:', !!threeScene, !!camera, !!renderer);
         if (!THREE_ || !threeScene || !camera || !renderer) {
-          console.warn('Ambiente rendering non disponibile nel callback.'); return;
+          console.warn('Ambiente rendering non disponibile nel callback.');
+          return;
         }
 
-        // ===================== DTM / bounding box / parallelepipedo (come prima) =====================
+        // ===================== Ricerca DTM e setup materiale =====================
         let dtm = null;
         threeScene.traverse(function(object) {
-          if (object.userData && object.userData.layerId === 2) { dtm = object; }
+          if (object.userData && object.userData.layerId === 2) {
+            dtm = object;
+            console.log('Layer DTM trovato con layerId: 2', object.name || 'no name');
+          }
         });
-        if (dtm) dtm.traverse(n => { if (n.isMesh) { const mats = Array.isArray(n.material)?n.material:[n.material]; for(const m of mats){ if(!m) continue; if(typeof m.opacity!=='number' || m.opacity===1) m.opacity=0.6; m.transparent=true; m.depthTest=false; m.depthWrite=false; m.side=THREE_.DoubleSide; m.needsUpdate=true; } n.renderOrder=999; } });
 
+        if (!dtm) console.warn('Impossibile trovare il layer DTM con layerId: 2');
+
+        // Rendi DTM semitrasparente e sempre visibile
+        if (dtm) dtm.traverse(n => {
+          if (n.isMesh) {
+            const mats = Array.isArray(n.material) ? n.material : [n.material];
+            for (const m of mats) {
+              if (!m) continue;
+              if (typeof m.opacity !== 'number' || m.opacity === 1) m.opacity = 0.6;
+              m.transparent = true; m.depthTest = false; m.depthWrite = false; m.side = THREE_.DoubleSide; m.needsUpdate = true;
+            }
+            n.renderOrder = 999;
+          }
+        });
+
+        // ===================== Calcolo bounding box =====================
         const bb = new THREE_.Box3().setFromObject(dtm || threeScene);
         const size = bb.getSize(new THREE_.Vector3());
+        let vertIndex = 2; // Z di default
         const minDimIndex = (size.x < size.y) ? ((size.x < size.z) ? 0 : 2) : ((size.y < size.z) ? 1 : 2);
-        const vertIndex = minDimIndex;
+        vertIndex = minDimIndex;
         const axes2 = [0,1,2].filter(i => i !== vertIndex);
         const minA = bb.min.getComponent(axes2[0]);
         const maxA = bb.max.getComponent(axes2[0]);
         const minB = bb.min.getComponent(axes2[1]);
         const maxB = bb.max.getComponent(axes2[1]);
 
-        const DEPTH = 10000;
-        const STEP = 1000;
+        // ===================== Parallelepipedo e etichette =====================
+        const DEPTH = 10000; // m
+        const STEP = 1000;   // m
         const LABEL_OFFSET = 30;
         const referenceZ = 0;
         const topZParallelepiped = referenceZ;
@@ -212,11 +255,12 @@ try {
           threeScene.add(l);
           return l;
         }
+        // Disegno
         for (let i=0;i<4;i++) addLine(topCorners[i], topCorners[(i+1)%4]);
         for (let i=0;i<4;i++) addLine(bottomCorners[i], bottomCorners[(i+1)%4]);
         for (let i=0;i<4;i++) addLine(topCorners[i], bottomCorners[i]);
 
-        // etichette (come prima)
+        // Etichette
         const labels = [];
         const centerFoot = new THREE_.Vector3();
         centerFoot.setComponent(axes2[0], (maxA + minA) / 2);
@@ -250,7 +294,7 @@ try {
               L.el.style.left = Math.round(sx) + 'px';
               L.el.style.top = Math.round(sy) + 'px';
             }
-          } catch (e) { console.error('Errore updateLabels:', e); }
+          } catch (e) { console.error('Errore durante l\'aggiornamento delle etichette:', e); }
         }
         updateLabels();
 
@@ -265,11 +309,11 @@ try {
         const eraserVal = document.getElementById('eraserVal');
         const pointer = document.getElementById('pointer');
 
-        let mode = null, drawing=false, currentLine=null, lines = [], nextId=1, highlighted=null;
-        let drawPlane = null;
+        let mode = null, drawing=false, currentLine=null, lines = [], nextId=1, highlighted=null; let drawPlane = null;
 
         function setMode(m){
-          // toggle
+          if (m === 'pen') { eraserBtn.classList.remove('active'); }
+          if (m === 'eraser') { penBtn.classList.remove('active'); }
           mode = (mode===m)? null : m;
           penBtn.classList.toggle('active', mode==='pen');
           eraserBtn.classList.toggle('active', mode==='eraser');
@@ -279,15 +323,11 @@ try {
           }
           updatePointer();
         }
-
-        // ensure UI waits for Line2
-        penBtn.addEventListener('click', async ()=>{ await window.line2Ready; setMode('pen'); });
-        eraserBtn.addEventListener('click', async ()=>{ await window.line2Ready; setMode('eraser'); });
+        penBtn.addEventListener('click', ()=> setMode('pen'));
+        eraserBtn.addEventListener('click', ()=> setMode('eraser'));
         clearBtn.addEventListener('click', ()=>{ for (const L of lines) threeScene.remove(L.object3d); lines.length=0; highlighted=null; });
-
         thicknessInput.addEventListener('input', ()=>{ thicknessVal.textContent = thicknessInput.value; updatePointer(); });
         eraserSizeInput.addEventListener('input', ()=>{ eraserVal.textContent = eraserSizeInput.value; updatePointer(); });
-
         function updatePointer(){ const sz = mode==='eraser'? parseInt(eraserSizeInput.value,10) : parseInt(thicknessInput.value,10); pointer.style.width=Math.max(10,sz)+'px'; pointer.style.height=Math.max(10,sz)+'px'; pointer.classList.toggle('eraser', mode==='eraser'); }
         updatePointer();
 
@@ -304,39 +344,14 @@ try {
           const positions = []; for (const p of points) positions.push(p.x,p.y,p.z);
           lineObj.object3d.geometry.setPositions(positions);
           if (lineObj.object3d.material && lineObj.object3d.material.resolution) lineObj.object3d.material.resolution.set(renderer.domElement.clientWidth, renderer.domElement.clientHeight);
-          if (lineObj.object3d.computeLineDistances) lineObj.object3d.computeLineDistances();
+          lineObj.object3d.computeLineDistances();
           lineObj.object3d.geometry.needsUpdate = true;
         }
         function toScreenPosition(v3){ const v=v3.clone().project(camera); return { x:(v.x+1)*0.5*renderer.domElement.clientWidth, y:(1-v.y)*0.5*renderer.domElement.clientHeight, z:v.z }; }
+        function findNearestLineSegment(mouseX, mouseY, radiusPx){ let best=null, bestDist=Infinity; for (const L of lines){ const pts=L.points; for (let i=0;i<pts.length-1;i++){ const a=toScreenPosition(pts[i]); const b=toScreenPosition(pts[i+1]); const dx=b.x-a.x, dy=b.y-a.y, l2=dx*dx+dy*dy; let t=0; if (l2>1e-6) t=((mouseX-a.x)*dx + (mouseY-a.y)*dy)/l2; t=Math.max(0,Math.min(1,t)); const px=a.x+t*dx, py=a.y+t*dy; const dist=Math.hypot(mouseX-px, mouseY-py); if (dist<bestDist){ bestDist=dist; const cp=new THREE_.Vector3().lerpVectors(pts[i], pts[i+1], t); best={line:L, segIndex:i, segT:t, closestPoint:cp, dist}; } } } if (best && best.dist<=radiusPx) return best; return null; }
+        function setHighlight(L){ if (highlighted===L) return; if (highlighted){ try{ highlighted.object3d.material.color.set(highlighted.color); highlighted.object3d.material.linewidth = Math.max(0.0006, highlighted.thickness/100); highlighted.highlighted=false; }catch(e){} } highlighted=L; if (highlighted){ try{ highlighted.object3d.material.color.set(0xFFFF66); highlighted.object3d.material.linewidth = Math.max(0.001, highlighted.thickness/80); highlighted.highlighted=true;}catch(e){} } }
 
-        function findNearestLineSegment(mouseX, mouseY, radiusPx){
-          let best=null, bestDist=Infinity;
-          for (const L of lines){
-            const pts=L.points;
-            for (let i=0;i<pts.length-1;i++){
-              const a=toScreenPosition(pts[i]); const b=toScreenPosition(pts[i+1]);
-              const dx=b.x-a.x, dy=b.y-a.y, l2=dx*dx+dy*dy;
-              let t=0; if (l2>1e-6) t=((mouseX-a.x)*dx + (mouseY-a.y)*dy)/l2;
-              t=Math.max(0,Math.min(1,t));
-              const px=a.x+t*dx, py=a.y+t*dy; const dist=Math.hypot(mouseX-px, mouseY-py);
-              if (dist<bestDist){ bestDist=dist; const cp=new THREE_.Vector3().lerpVectors(pts[i], pts[i+1], t); best={line:L, segIndex:i, segT:t, closestPoint:cp, dist}; }
-            }
-          }
-          if (best && best.dist<=radiusPx) return best; return null;
-        }
-
-        function setHighlight(L){
-          if (highlighted===L) return;
-          if (highlighted){
-            try{ highlighted.object3d.material.color.set(highlighted.color); highlighted.object3d.material.linewidth = Math.max(0.0006, highlighted.thickness/100); highlighted.highlighted=false; }catch(e){}
-          }
-          highlighted=L;
-          if (highlighted){
-            try{ highlighted.object3d.material.color.set(0xFFFF66); highlighted.object3d.material.linewidth = Math.max(0.001, highlighted.thickness/80); highlighted.highlighted=true;}catch(e){}
-          }
-        }
-
-        function clampToParallelepiped(pt){
+        function clampToParallelepiped(pt){ // clamp a bbox XY e tra bottom/top Z del parallelepipedo
           bb.clampPoint(pt, pt);
           const z = pt.getComponent(vertIndex);
           const zc = Math.max(bottomZParallelepiped, Math.min(topZParallelepiped, z));
@@ -344,6 +359,7 @@ try {
           return pt;
         }
 
+        // erase a pezzi: rimuove punti entro raggio schermo e ricostruisce spezzoni
         function erasePieceAt(mouseX, mouseY, radiusPx){
           const found = findNearestLineSegment(mouseX, mouseY, radiusPx);
           if (!found) return false;
@@ -357,33 +373,19 @@ try {
           if (cur && cur.length>=2) chunks.push(cur);
           threeScene.remove(L.object3d);
           const idx=lines.indexOf(L); if (idx>=0) lines.splice(idx,1);
-          for (const c of chunks){
-            const obj = makeLineObject(c, L.color, L.thickness);
-            const newLine = { id: nextId++, object3d: obj.object3d, material: obj.material, points: c, color: L.color, thickness: L.thickness, opacity:1.0 };
-            threeScene.add(newLine.object3d); lines.push(newLine);
-          }
+          for (const c of chunks){ const obj=makeLineObject(c, L.color, L.thickness); const newLine={ id: nextId++, object3d: obj.object3d, material: obj.material, points: c, color: L.color, thickness: L.thickness, opacity:1.0 }; threeScene.add(newLine.object3d); lines.push(newLine); }
           return true;
         }
 
         const domEl = renderer.domElement; let mouse={x:0,y:0};
-        domEl.addEventListener('pointermove', onPointerMove);
-        domEl.addEventListener('pointerdown', onPointerDown);
-        domEl.addEventListener('pointerup', onPointerUp);
+        domEl.addEventListener('pointermove', onPointerMove); domEl.addEventListener('pointerdown', onPointerDown); domEl.addEventListener('pointerup', onPointerUp);
 
         function getRay(clientX, clientY){ const rect=domEl.getBoundingClientRect(); const ndcX=((clientX-rect.left)/domEl.clientWidth)*2-1; const ndcY=-(((clientY-rect.top)/domEl.clientHeight)*2-1); const rc=new THREE_.Raycaster(); rc.setFromCamera(new THREE_.Vector2(ndcX, ndcY), camera); return rc; }
 
-        function onPointerMove(ev){
-          const rect=domEl.getBoundingClientRect();
-          mouse.x = ev.clientX - rect.left; mouse.y = ev.clientY - rect.top;
-          pointer.style.left = ev.clientX + 'px'; pointer.style.top = ev.clientY + 'px';
-
-          if (mode==='eraser'){
-            const seg=findNearestLineSegment(mouse.x, mouse.y, parseInt(eraserSizeInput.value,10));
-            setHighlight(seg? seg.line : null);
-            if (drawing) erasePieceAt(mouse.x, mouse.y, parseInt(eraserSizeInput.value,10));
-          }
-
+        function onPointerMove(ev){ const rect=domEl.getBoundingClientRect(); mouse.x = ev.clientX - rect.left; mouse.y = ev.clientY - rect.top; pointer.style.left = ev.clientX + 'px'; pointer.style.top = ev.clientY + 'px';
+          if (mode==='eraser'){ const seg=findNearestLineSegment(mouse.x, mouse.y, parseInt(eraserSizeInput.value,10)); setHighlight(seg? seg.line : null); if (drawing) erasePieceAt(mouse.x, mouse.y, parseInt(eraserSizeInput.value,10)); }
           if (drawing && mode==='pen' && currentLine){
+            // aggiorna piano di disegno in base alla vista corrente (bloccata per rotazione)
             const dir=new THREE_.Vector3(); camera.getWorldDirection(dir);
             const ray=new THREE_.Ray(camera.position.clone(), dir.clone());
             const hit=ray.intersectBox(bb, new THREE_.Vector3());
@@ -395,10 +397,7 @@ try {
           }
         }
 
-        async function onPointerDown(ev){
-          if (ev.button !== 0) return;
-          await window.line2Ready; // assicurati Line2 pronto
-          if (mode==='pen'){
+        function onPointerDown(ev){ if (ev.button !== 0) return; if (mode==='pen'){
             drawing=true; currentLine={ id: nextId++, points: [], color: colorPicker.value, thickness: parseInt(thicknessInput.value,10) };
             const dir=new THREE_.Vector3(); camera.getWorldDirection(dir);
             const ray=new THREE_.Ray(camera.position.clone(), dir.clone());
