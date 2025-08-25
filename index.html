@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Three.js — Pen & Eraser on glTF/glb (Drag & Drop) — UI Adjusted</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js"
+  }
+}
+</script>
+<style>
+  html,body{height:100%;margin:0;overflow:hidden;font-family:Arial,Helvetica,sans-serif}
+  #canvas-container{width:100%;height:100%;position:relative;background:#e9eef3}
+
+  /* UI: ridotta orizzontalmente del 40% rispetto al valore precedente (260px -> 156px) */
+  .ui{
+    position:absolute;
+    left:12px; top:12px;
+    background:rgba(255,255,255,0.95);
+    padding:10px;
+    border-radius:8px;
+    box-shadow:0 6px 18px rgba(0,0,0,0.12);
+    z-index:10;
+    min-width:156px;
+    transition: all 180ms ease;
+  }
+  .ui.compact {
+    min-width:80px;
+    width:80px;
+    padding:8px;
+    overflow:hidden;
+  }
+  .ui.compact .details { display:none; }
+  .ui.compact label { font-size:12px; }
+  .ui.compact .btn { padding:4px 6px; font-size:12px; }
+  .ui .header-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .ui .title { font-weight:700; font-size:14px; }
+  .ui .shrink-btn {
+    background:#f4f4f4; border:1px solid #ccc; padding:4px 6px; border-radius:6px;
+    cursor:pointer; font-size:13px;
+  }
+
+  .ui label{display:block;font-size:13px;margin-top:6px}
+  .ui input[type="range"]{width:100%}
+  .btn{display:inline-block;margin-top:8px;padding:6px 10px;border-radius:6px;cursor:pointer;border:1px solid #bbb;background:#fafafa}
+  .btn.active{background-color:#ffcccc}
+  .mode-toggle{display:flex;gap:8px;margin-top:6px;align-items:center}
+  #dropHint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:16px 22px;border-radius:10px;background:rgba(255,255,255,0.9);box-shadow:0 6px 24px rgba(0,0,0,0.12);z-index:9;font-size:15px;pointer-events:none}
+  #dropHint.hidden{display:none}
+</style>
+</head>
+<body>
+<div id="canvas-container"></div>
+
+<div id="dropHint">Trascina qui un file <strong>.glb</strong> o <strong>.gltf</strong> per caricare il modello</div>
+
+<div class="ui" id="ui">
+  <div class="header-row">
+    <div class="title">Pannello sketch</div>
+    <!-- Bottone per rimpicciolire la UI -->
+    <button id="toggle-ui" class="shrink-btn" title="Riduci/espandi UI">▤</button>
+  </div>
+
+  <!-- checkbox spostata a sinistra della scritta -->
+  <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+    <input id="draw-mode" type="checkbox">
+    <div style="font-size:12px">Modalità disegno</div>
+  </div>
+
+  <div class="mode-toggle">
+    <label><input type="radio" name="tool" value="pen" checked> Penna</label>
+    <label><input type="radio" name="tool" value="eraser"> Gomma</label>
+  </div>
+
+  <div style="margin-top:8px">
+    <button class="btn" id="move-axis">Muovi assi</button>
+  </div>
+
+  <label>Colore penna: <input id="color" type="color" value="#ff3300"></label>
+
+  <!-- rimosso il simbolo "m" -->
+  <label>Spessore penna: <input id="thickness" type="range" min="0.1" max="200" value="6" step="0.1"><span id="thickness-val">6</span></label>
+
+  <div id="eraser-controls" style="display:none;">
+    <!-- rimosso il simbolo "m" -->
+    <label>Dimensione gomma: <input id="eraser-size" type="range" min="1" max="400" value="80"><span id="eraser-val">80</span></label>
+    <div style="font-size:12px;color:#555;margin-top:4px">Passa con il puntatore per evidenziare (giallo). Clic per cancellare i pezzi evidenziati.</div>
+  </div>
+
+  <div style="margin-top:8px">
+    <button class="btn" id="clear-all">Cancella tutto</button>
+  </div>
+
+  <div class="details" style="font-size:12px;color:#666;margin-top:8px">
+    Quando "Modalità disegno" ON: sinistro = disegna/cancella, destro = pan, rotella = zoom. Disattiva per ruotare col sinistro.
+    <br><br>
+    Trascina un .glb/.gltf sulla finestra per caricare il modello. Gli assi verranno posizionati al centro del modello.
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/loaders/GLTFLoader.js';
+import { Line2 } from 'https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/lines/LineMaterial.js';
+
+// ---------- Config base ----------
+const container = document.getElementById('canvas-container');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(container.clientWidth, container.clientHeight);
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xe9eef3);
+
+const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100000);
+camera.position.set(0, 0, 2000);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+
+// lighting
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const dir = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(1,2,1).multiplyScalar(1000); scene.add(dir);
+
+// ---------- Model handling ----------
+let model = null;
+const gltfLoader = new GLTFLoader();
+
+// function to fit camera to object (center + distance)
+function fitCameraToObject(object, offsetFactor = 2.2) {
+  const box = new THREE.Box3().setFromObject(object);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+
+  const maxDim = Math.max(size.x, size.y, size.z);
+  if (maxDim === 0) return { box, size, center, maxDim, cameraDistance: 0 };
+
+  const fov = camera.fov * (Math.PI/180);
+  let cameraDistance = Math.abs(maxDim / 2 / Math.tan(fov/2)) * offsetFactor;
+
+  const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+  if (dir.lengthSq() === 0) dir.set(0,0,1);
+  camera.position.copy(center).addScaledVector(dir, cameraDistance);
+  camera.near = Math.max(0.1, cameraDistance / 1000);
+  camera.far = cameraDistance * 1000;
+  camera.updateProjectionMatrix();
+
+  controls.target.copy(center);
+  controls.update();
+
+  return { box, size, center, maxDim, cameraDistance };
+}
+
+// ---------- Axis helper: lunghezza ESATTA 1000 unità ----------
+let axisHelper = null;
+let isAxisSelected = false;
+let axisHelperPosition = new THREE.Vector3(0,0,0);
+
+// approximated pointer size in pixels (typical arrow ~16px)
+const POINTER_APPROX_PX = 16;
+const DESIRED_CENTER_PX = POINTER_APPROX_PX * 2; // ~32 px
+
+function createAxisHelper(options = {}) {
+  if (axisHelper) {
+    scene.remove(axisHelper);
+  }
+
+  const center = options.center ? options.center.clone() : new THREE.Vector3(0,0,0);
+  const axisLength = 1000; // <-- esatto
+
+  const group = new THREE.Group();
+  group.name = 'axisHelper';
+
+  const headLen = axisLength * 0.12;
+  const headWidth = axisLength * 0.06;
+  const xAxis = new THREE.ArrowHelper(new THREE.Vector3(1,0,0), new THREE.Vector3(0,0,0), axisLength, 0xff0000, headLen, headWidth);
+  const yAxis = new THREE.ArrowHelper(new THREE.Vector3(0,1,0), new THREE.Vector3(0,0,0), axisLength, 0x00ff00, headLen, headWidth);
+  const zAxis = new THREE.ArrowHelper(new THREE.Vector3(0,0,1), new THREE.Vector3(0,0,0), axisLength, 0x0000ff, headLen, headWidth);
+  group.add(xAxis, yAxis, zAxis);
+
+  const makeTextSprite = (text) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.font = 'Bold 36px Arial';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillText(text, canvas.width/2, canvas.height/2);
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex });
+    const sp = new THREE.Sprite(mat);
+    return sp;
+  };
+
+  const sx = makeTextSprite('X'); sx.position.set(axisLength + headLen*0.6, 0, 0); group.add(sx);
+  const sy = makeTextSprite('Y'); sy.position.set(0, axisLength + headLen*0.6, 0); group.add(sy);
+  const sz = makeTextSprite('Z'); sz.position.set(0, 0, axisLength + headLen*0.6); group.add(sz);
+
+  const sphereGeometry = new THREE.SphereGeometry(1, 24, 18);
+  const sphereMaterial = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.85 });
+  const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+  sphere.name = 'axisHelperCenter';
+  group.add(sphere);
+
+  group.position.copy(center);
+  axisHelperPosition.copy(center);
+  axisHelper = group;
+  scene.add(axisHelper);
+
+  updateAxisCenterVisualSize();
+
+  return axisHelper;
+}
+
+function updateAxisCenterVisualSize() {
+  if (!axisHelper) return;
+  const sphere = axisHelper.children.find(c => c.name === 'axisHelperCenter');
+  if (!sphere) return;
+  const worldPoint = axisHelper.position.clone();
+  const pxPerM = pixelPerMeterAt(worldPoint);
+  const desiredMeters = Math.max(0.01, DESIRED_CENTER_PX / Math.max(0.0001, pxPerM));
+  const clampedMeters = THREE.MathUtils.clamp(desiredMeters, 0.001, 1000);
+  sphere.scale.set(clampedMeters, clampedMeters, clampedMeters);
+}
+
+// ---------- Drawing structures ----------
+const strokes = [];
+const pointer = new THREE.Vector2();
+const raycaster = new THREE.Raycaster();
+let drawing = false;
+let currentStroke = null;
+let lastPoint = null;
+let drawingPlane = null;
+let currentFaceNormal = null;
+let currentFacePlane = null;
+const minSegmentDistance = 0.6;
+
+const cursorGeom = new THREE.SphereGeometry(1, 12, 10);
+const penCursorMat = new THREE.MeshBasicMaterial({ color:0xff3300, opacity:0.6, transparent:true, depthTest:false });
+const eraserCursorMat = new THREE.MeshBasicMaterial({ color:0xFFEE66, opacity:0.45, transparent:true, depthTest:false });
+const cursorMesh = new THREE.Mesh(cursorGeom, penCursorMat);
+cursorMesh.visible = false;
+scene.add(cursorMesh);
+
+// ---------- Line2 helpers ----------
+function worldToScreen(point) {
+  const p = point.clone().project(camera);
+  const x = (p.x * 0.5 + 0.5) * renderer.domElement.width;
+  const y = (-p.y * 0.5 + 0.5) * renderer.domElement.height;
+  return new THREE.Vector2(x,y);
+}
+
+function pixelPerMeterAt(point) {
+  const p1 = worldToScreen(point);
+  const worldX = new THREE.Vector3(1,0,0);
+  const test = point.clone().add(worldX);
+  const p2 = worldToScreen(test);
+  const d = p1.distanceTo(p2);
+  if (d < 0.0001) {
+    const testY = point.clone().add(new THREE.Vector3(0,1,0));
+    const p3 = worldToScreen(testY);
+    return Math.max(0.5, p1.distanceTo(p3));
+  }
+  return Math.max(0.5, d);
+}
+
+function createLineSegmentBetweenPoints(p1, p2, thickness_m, colorHex) {
+  const positions = [ p1.x, p1.y, p1.z, p2.x, p2.y, p2.z ];
+  const geom = new LineGeometry();
+  geom.setPositions(positions);
+  const mid = new THREE.Vector3().addVectors(p1,p2).multiplyScalar(0.5);
+  const pxPerM = pixelPerMeterAt(mid);
+  const linewidthPx = Math.max(1, thickness_m * pxPerM);
+  const mat = new LineMaterial({
+    color: (typeof colorHex === 'string' ? new THREE.Color(colorHex).getHex() : colorHex),
+    linewidth: linewidthPx,
+    dashed: false,
+    resolution: new THREE.Vector2(renderer.domElement.width, renderer.domElement.height)
+  });
+  mat.resolution.set(renderer.domElement.width, renderer.domElement.height);
+  const line = new Line2(geom, mat);
+  line.computeLineDistances();
+  line.scale.set(1,1,1);
+  line.userData._a = p1.clone();
+  line.userData._b = p2.clone();
+  line.userData._thickness_m = thickness_m;
+  line.userData._colorHex = (typeof colorHex === 'string' ? new THREE.Color(colorHex).getHex() : colorHex);
+  return line;
+}
+
+// helper 2D
+function distancePointToSegment2D(p, a, b) {
+  const ab = new THREE.Vector2().subVectors(b, a);
+  const ap = new THREE.Vector2().subVectors(p, a);
+  const abLen2 = ab.lengthSq();
+  if (abLen2 === 0) return ap.length();
+  const t = Math.max(0, Math.min(1, ap.dot(ab) / abLen2));
+  const proj = new THREE.Vector2(a.x + ab.x * t, a.y + ab.y * t);
+  return proj.distanceTo(p);
+}
+function segmentScreenDistancePx(pointerScreenPx, seg) {
+  const a = seg.userData._a; const b = seg.userData._b;
+  if (!a || !b) return Infinity;
+  const aScreen = worldToScreen(a);
+  const bScreen = worldToScreen(b);
+  return distancePointToSegment2D(pointerScreenPx, aScreen, bScreen);
+}
+
+// ---------- UI logic ----------
+const drawModeCheckbox = document.getElementById('draw-mode');
+const modeRadios = document.querySelectorAll('input[name="tool"]');
+const colorInput = document.getElementById('color');
+const thicknessInput = document.getElementById('thickness');
+const thicknessVal = document.getElementById('thickness-val');
+const eraserControls = document.getElementById('eraser-controls');
+const eraserSizeInput = document.getElementById('eraser-size');
+const eraserVal = document.getElementById('eraser-val');
+const clearBtn = document.getElementById('clear-all');
+const moveAxisBtn = document.getElementById('move-axis');
+const toggleUIButton = document.getElementById('toggle-ui');
+const uiElement = document.getElementById('ui');
+
+let tool = 'pen';
+let drawMode = false;
+let moveAxisMode = false;
+
+modeRadios.forEach(r => r.addEventListener('change', ()=> {
+  tool = document.querySelector('input[name="tool"]:checked').value;
+  eraserControls.style.display = tool === 'eraser' ? 'block' : 'none';
+  updateCursorAppearance();
+  if (moveAxisMode && tool === 'pen') {
+    moveAxisMode = false;
+    moveAxisBtn.classList.remove('active');
+    moveAxisBtn.textContent = 'Muovi assi';
+    isAxisSelected = false;
+    controls.enabled = true;
+  }
+}));
+
+drawModeCheckbox.addEventListener('change', ()=> {
+  drawMode = drawModeCheckbox.checked;
+  if (drawMode && moveAxisMode) {
+    moveAxisMode = false;
+    moveAxisBtn.classList.remove('active');
+    moveAxisBtn.textContent = 'Muovi assi';
+    isAxisSelected = false;
+    controls.enabled = true;
+  }
+  updateCursorAppearance();
+});
+
+thicknessInput.addEventListener('input', ()=> thicknessVal.textContent = thicknessInput.value);
+eraserSizeInput.addEventListener('input', ()=> eraserVal.textContent = eraserSizeInput.value);
+
+moveAxisBtn.addEventListener('click', () => {
+  moveAxisMode = !moveAxisMode;
+  if (moveAxisMode) {
+    moveAxisBtn.classList.add('active');
+    moveAxisBtn.textContent = 'Muovi assi (attivo)';
+    drawModeCheckbox.checked = false;
+    drawMode = false;
+    updateCursorAppearance();
+    controls.enabled = true;
+  } else {
+    moveAxisBtn.classList.remove('active');
+    moveAxisBtn.textContent = 'Muovi assi';
+    isAxisSelected = false;
+    controls.enabled = true;
+  }
+});
+
+clearBtn.addEventListener('click', ()=> {
+  for (const s of strokes) {
+    for (const seg of s.segments) {
+      scene.remove(seg);
+      if (seg.geometry) seg.geometry.dispose();
+      if (seg.material) seg.material.dispose();
+    }
+  }
+  strokes.length = 0;
+});
+
+toggleUIButton.addEventListener('click', ()=> {
+  uiElement.classList.toggle('compact');
+});
+
+// ---------- Pointer handlers ----------
+function onPointerMove(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ( (event.clientX - rect.left) / rect.width ) * 2 - 1;
+  pointer.y = - ( (event.clientY - rect.top) / rect.height ) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+
+  // move axis
+  if (isAxisSelected && moveAxisMode) {
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+      camera.getWorldDirection(new THREE.Vector3()).clone().negate(),
+      axisHelper.position
+    );
+    const p3 = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(plane, p3)) {
+      axisHelper.position.copy(p3);
+      axisHelperPosition.copy(p3);
+    }
+    return;
+  }
+
+  if (drawMode) {
+    const p3 = getPointerWorldPoint(event);
+    if (p3) {
+      const snappedP3 = p3.clone();
+      cursorMesh.position.copy(snappedP3);
+    }
+  }
+
+  if (drawing && tool === 'pen' && currentStroke) {
+    const p = new THREE.Vector3();
+    if (drawingPlane && raycaster.ray.intersectPlane(drawingPlane, p)) {
+      const snappedP = p.clone();
+      if (!lastPoint) { lastPoint = snappedP.clone(); return; }
+      if (snappedP.distanceTo(lastPoint) >= minSegmentDistance) {
+        const thickness_m = parseFloat(thicknessInput.value);
+        const seg = createLineSegmentBetweenPoints(lastPoint.clone(), snappedP.clone(), thickness_m, colorInput.value);
+        scene.add(seg);
+        currentStroke.segments.push(seg);
+        lastPoint.copy(snappedP);
+      }
+    }
+    return;
+  }
+
+  // eraser hover - pixel based
+  if (tool === 'eraser' && drawMode) {
+    for (const s of strokes) for (const seg of s.segments) {
+      if (seg.userData._highlightedByEraser) {
+        if (seg.userData._origColorHex !== undefined) seg.material.color.setHex(seg.userData._origColorHex);
+        seg.userData._highlightedByEraser = false;
+      }
+    }
+
+    const pointerScreenPx = new THREE.Vector2(event.clientX - rect.left, event.clientY - rect.top);
+    const p3 = getPointerWorldPoint(event);
+    if (!p3) return;
+    const eraserSizeMeters = parseFloat(eraserSizeInput.value);
+
+    for (const s of strokes) {
+      for (const seg of s.segments) {
+        const a = seg.userData._a; const b = seg.userData._b;
+        if (!a || !b) continue;
+        const mid = new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
+        const pxPerM = pixelPerMeterAt(mid);
+        const eraserPx = Math.max(6, eraserSizeMeters * pxPerM);
+        const distPx = segmentScreenDistancePx(pointerScreenPx, seg);
+        if (distPx <= eraserPx) {
+          if (!seg.userData._highlightedByEraser) {
+            seg.userData._highlightedByEraser = true;
+            seg.userData._origColorHex = seg.userData._colorHex;
+            seg.material.color.setHex(0xFFEE66);
+          }
+        }
+      }
+    }
+  }
+}
+
+function onPointerDown(event) {
+  if (event.button === 0) {
+    if (moveAxisMode) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ( (event.clientX - rect.left) / rect.width ) * 2 - 1;
+      pointer.y = - ( (event.clientY - rect.top) / rect.height ) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+
+      if (axisHelper) {
+        const sphere = axisHelper.children.find(child => child.name === 'axisHelperCenter');
+        if (sphere) {
+          const intersects = raycaster.intersectObject(sphere);
+          if (intersects.length > 0) {
+            isAxisSelected = true;
+            controls.enabled = false;
+            event.preventDefault(); event.stopPropagation(); return;
+          }
+        }
+      }
+    } else if (drawMode && (tool === 'pen' || tool === 'eraser')) {
+      controls.enabled = false;
+      if (tool === 'pen') {
+        drawing = true;
+        currentStroke = { segments: [], color: colorInput.value, thickness_m: parseFloat(thicknessInput.value) };
+        strokes.push(currentStroke);
+
+        const axisOrigin = axisHelper ? axisHelper.position.clone() : new THREE.Vector3(0,0,0);
+        lastPoint = axisOrigin.clone();
+
+        const camDir = camera.getWorldDirection(new THREE.Vector3()).clone();
+        drawingPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(camDir.clone().negate(), axisOrigin);
+
+        const tiny = axisOrigin.clone().add(camDir.clone().multiplyScalar(0.001));
+        const seg = createLineSegmentBetweenPoints(axisOrigin.clone(), tiny.clone(), parseFloat(thicknessInput.value), colorInput.value);
+        scene.add(seg);
+        currentStroke.segments.push(seg);
+      } else {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const pointerScreenPx = new THREE.Vector2(event.clientX - rect.left, event.clientY - rect.top);
+
+        for (let i = strokes.length - 1; i >= 0; i--) {
+          const stroke = strokes[i];
+          for (let j = stroke.segments.length - 1; j >= 0; j--) {
+            const seg = stroke.segments[j];
+            const a = seg.userData._a; const b = seg.userData._b;
+            if (!a || !b) continue;
+            const mid = new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
+            const pxPerM = pixelPerMeterAt(mid);
+            const eraserPx = Math.max(6, parseFloat(eraserSizeInput.value) * pxPerM);
+            const distPx = segmentScreenDistancePx(pointerScreenPx, seg);
+            if (distPx <= eraserPx) {
+              scene.remove(seg); if (seg.geometry) seg.geometry.dispose(); if (seg.material) seg.material.dispose();
+              stroke.segments.splice(j,1);
+            } else {
+              if (seg.userData._highlightedByEraser) {
+                if (seg.userData._origColorHex !== undefined) seg.material.color.setHex(seg.userData._origColorHex);
+                seg.userData._highlightedByEraser = false;
+              }
+            }
+          }
+          if (stroke.segments.length === 0) strokes.splice(i,1);
+        }
+      }
+      event.preventDefault(); event.stopPropagation(); return;
+    }
+  }
+}
+
+function onPointerUp(event) {
+  if (event.button === 0 && isAxisSelected && moveAxisMode) {
+    isAxisSelected = false;
+    controls.enabled = true;
+    event.preventDefault(); event.stopPropagation(); return;
+  }
+
+  if (event.button !== 0) return;
+  if (!controls.enabled) controls.enabled = true;
+  if (drawing) {
+    drawing = false; currentStroke = null; lastPoint = null; drawingPlane = null;
+  }
+  if (isAxisSelected && moveAxisMode) {
+    isAxisSelected = false;
+  }
+}
+
+function getPointerWorldPoint(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ( (event.clientX - rect.left) / rect.width ) * 2 - 1;
+  pointer.y = - ( (event.clientY - rect.top) / rect.height ) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+
+  if (model) {
+    const hits = raycaster.intersectObject(model, true);
+    if (hits.length > 0) {
+      const hit = hits[0];
+      currentFaceNormal = hit.face ? hit.face.normal.clone() : camera.getWorldDirection(new THREE.Vector3()).clone().negate();
+      currentFacePlane = new THREE.Plane().setFromNormalAndCoplanarPoint(currentFaceNormal, hit.point);
+      return hit.point.clone();
+    }
+  }
+
+  const fallbackPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+    camera.getWorldDirection(new THREE.Vector3()).clone().negate(),
+    camera.position.clone().add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(4000))
+  );
+  const p = new THREE.Vector3();
+  raycaster.ray.intersectPlane(fallbackPlane, p);
+  currentFaceNormal = fallbackPlane.normal.clone();
+  currentFacePlane = fallbackPlane.clone();
+  return p;
+}
+
+function updateCursorAppearance() {
+  if (!drawMode) { cursorMesh.visible = false; return; }
+  cursorMesh.visible = true;
+  if (tool === 'pen') {
+    cursorMesh.material = penCursorMat;
+    const r = Math.max(0.2, parseFloat(thicknessInput.value));
+    cursorMesh.scale.set(r, r, r);
+  } else {
+    cursorMesh.material = eraserCursorMat;
+    const r = Math.max(1.0, parseFloat(eraserSizeInput.value));
+    cursorMesh.scale.set(r, r, r);
+  }
+}
+
+// ---------- Drag & Drop model loading ----------
+const dropHint = document.getElementById('dropHint');
+
+function handleFileDrop(file) {
+  const name = file.name.toLowerCase();
+  if (!name.endsWith('.glb') && !name.endsWith('.gltf')) {
+    alert('File non supportato. Usa .glb o .gltf');
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  gltfLoader.load(url, (gltf) => {
+    if (model) { scene.remove(model); model.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) { if (Array.isArray(c.material)) c.material.forEach(m=>m.dispose()); else c.material.dispose(); } }); model = null; }
+    model = gltf.scene;
+    scene.add(model);
+
+    const info = fitCameraToObject(model, 2.0);
+    const center = info.center;
+    createAxisHelper({ center });
+
+    dropHint.classList.add('hidden');
+    URL.revokeObjectURL(url);
+  }, undefined, (err) => {
+    console.error('load error', err);
+    URL.revokeObjectURL(url);
+    alert('Errore nel caricamento del modello');
+  });
+}
+
+window.addEventListener('dragover', (e) => { e.preventDefault(); dropHint.classList.remove('hidden'); });
+window.addEventListener('dragenter', (e) => { e.preventDefault(); dropHint.classList.remove('hidden'); });
+window.addEventListener('dragleave', (e) => { e.preventDefault(); /* keep hint until drop or exit */ });
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropHint.classList.add('hidden');
+  const dt = e.dataTransfer;
+  if (!dt || !dt.files || dt.files.length === 0) return;
+  handleFileDrop(dt.files[0]);
+});
+
+// ---------- Render loop ----------
+function animate() {
+  requestAnimationFrame(animate);
+  updateAxisCenterVisualSize();
+  renderer.render(scene, camera);
+}
+
+// initialization
+createAxisHelper({ center: new THREE.Vector3(0,0,0) });
+animate();
+
+// events
+renderer.domElement.addEventListener('pointermove', onPointerMove);
+renderer.domElement.addEventListener('pointerdown', onPointerDown);
+window.addEventListener('pointerup', onPointerUp);
+renderer.domElement.addEventListener('contextmenu', (e)=> e.preventDefault());
+
+// resize handling
+window.addEventListener('resize', ()=> {
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  camera.aspect = container.clientWidth / container.clientHeight;
+  camera.updateProjectionMatrix();
+  updateAxisCenterVisualSize();
+  scene.traverse(obj => {
+    if (obj.isLine2 && obj.material && obj.material.resolution) {
+      obj.material.resolution.set(renderer.domElement.width, renderer.domElement.height);
+      obj.material.needsUpdate = true;
+    }
+  });
+});
+</script>
+</body>
+</html>
