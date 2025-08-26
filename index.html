@@ -23,7 +23,7 @@
     border-radius:8px;
     box-shadow:0 6px 18px rgba(0,0,0,0.12);
     z-index:10;
-    min-width:156px;
+    min-width:100px;
     transition: all 180ms ease;
   }
   .ui.compact {
@@ -127,7 +127,7 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
 
 // lighting
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 const dir = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(1,2,1).multiplyScalar(1000); scene.add(dir);
 
 // ---------- Model handling ----------
