@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Three.js — Pen & Eraser on glTF/glb (Drag & Drop) — UI Adjusted</title>
+<title>Three.js — Pen & Eraser on glTF/glb — DropHint & Integer Thickness</title>
 <script type="importmap">
 {
   "imports": {
@@ -15,7 +15,6 @@
   html,body{height:100%;margin:0;overflow:hidden;font-family:Arial,Helvetica,sans-serif}
   #canvas-container{width:100%;height:100%;position:relative;background:#e9eef3}
 
-  /* UI: ridotta orizzontalmente del 40% rispetto al valore precedente (260px -> 156px) */
   .ui{
     position:absolute;
     left:12px; top:12px;
@@ -48,6 +47,9 @@
   .btn{display:inline-block;margin-top:8px;padding:6px 10px;border-radius:6px;cursor:pointer;border:1px solid #bbb;background:#fafafa}
   .btn.active{background-color:#ffcccc}
   .mode-toggle{display:flex;gap:8px;margin-top:6px;align-items:center}
+
+  .load-remote { display:block; margin-top:10px; padding:8px; background:#eef6ff; border:1px solid #bcd; border-radius:6px; cursor:pointer; font-size:13px; }
+
   #dropHint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:16px 22px;border-radius:10px;background:rgba(255,255,255,0.9);box-shadow:0 6px 24px rgba(0,0,0,0.12);z-index:9;font-size:15px;pointer-events:none}
   #dropHint.hidden{display:none}
 </style>
@@ -60,11 +62,9 @@
 <div class="ui" id="ui">
   <div class="header-row">
     <div class="title">Pannello sketch</div>
-    <!-- Bottone per rimpicciolire la UI -->
     <button id="toggle-ui" class="shrink-btn" title="Riduci/espandi UI">▤</button>
   </div>
 
-  <!-- checkbox spostata a sinistra della scritta -->
   <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
     <input id="draw-mode" type="checkbox">
     <div style="font-size:12px">Modalità disegno</div>
@@ -81,18 +81,19 @@
 
   <label>Colore penna: <input id="color" type="color" value="#ff3300"></label>
 
-  <!-- rimosso il simbolo "m" -->
-  <label>Spessore penna: <input id="thickness" type="range" min="0.1" max="200" value="6" step="0.1"><span id="thickness-val">6</span></label>
+  <!-- slider ora intero: min=1 step=1 -->
+  <label>Spessore penna: <input id="thickness" type="range" min="1" max="200" value="6" step="1"><span id="thickness-val">6</span></label>
 
   <div id="eraser-controls" style="display:none;">
-    <!-- rimosso il simbolo "m" -->
-    <label>Dimensione gomma: <input id="eraser-size" type="range" min="1" max="400" value="80"><span id="eraser-val">80</span></label>
+    <label>Dimensione gomma: <input id="eraser-size" type="range" min="1" max="400" value="80" step="1"><span id="eraser-val">80</span></label>
     <div style="font-size:12px;color:#555;margin-top:4px">Passa con il puntatore per evidenziare (giallo). Clic per cancellare i pezzi evidenziati.</div>
   </div>
 
   <div style="margin-top:8px">
     <button class="btn" id="clear-all">Cancella tutto</button>
   </div>
+
+  <button id="load-campi" class="load-remote">Carica modello Campi Flegrei</button>
 
   <div class="details" style="font-size:12px;color:#666;margin-top:8px">
     Quando "Modalità disegno" ON: sinistro = disegna/cancella, destro = pan, rotella = zoom. Disattiva per ruotare col sinistro.
@@ -131,7 +132,37 @@ const dir = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(1,2,1).m
 
 // ---------- Model handling ----------
 let model = null;
+let currentModelSourceUrl = null; // track source
 const gltfLoader = new GLTFLoader();
+const CAMPI_URL = 'https://marcscama.github.io/3D/VIPS-Campi-Flegrei.gltf';
+let isLoadingCampi = false;
+
+// DOM elements
+const dropHint = document.getElementById('dropHint');
+const thicknessInput = document.getElementById('thickness');
+const thicknessVal = document.getElementById('thickness-val');
+
+// helper: hide/show drop hint based on model presence
+function updateDropHintVisibility() {
+  if (model) dropHint.classList.add('hidden');
+  else dropHint.classList.remove('hidden');
+}
+
+// remove model and dispose
+function removeModel() {
+  if (!model) return;
+  scene.remove(model);
+  model.traverse(c => {
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) {
+      if (Array.isArray(c.material)) c.material.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });
+      else { if (c.material.map) c.material.map.dispose(); c.material.dispose(); }
+    }
+  });
+  model = null;
+  currentModelSourceUrl = null;
+  updateDropHintVisibility();
+}
 
 // function to fit camera to object (center + distance)
 function fitCameraToObject(object, offsetFactor = 2.2) {
@@ -160,12 +191,12 @@ function fitCameraToObject(object, offsetFactor = 2.2) {
   return { box, size, center, maxDim, cameraDistance };
 }
 
-// ---------- Axis helper: lunghezza ESATTA 1000 unità ----------
+// ---------- Axis helper: lunghezza ESATTA 1000 unità + halo ----------
 let axisHelper = null;
 let isAxisSelected = false;
 let axisHelperPosition = new THREE.Vector3(0,0,0);
 
-// approximated pointer size in pixels (typical arrow ~16px)
+// approx pointer size px, desired center visual px (double)
 const POINTER_APPROX_PX = 16;
 const DESIRED_CENTER_PX = POINTER_APPROX_PX * 2; // ~32 px
 
@@ -175,7 +206,7 @@ function createAxisHelper(options = {}) {
   }
 
   const center = options.center ? options.center.clone() : new THREE.Vector3(0,0,0);
-  const axisLength = 1000; // <-- esatto
+  const axisLength = 1000; // EXACTLY 1000 units
 
   const group = new THREE.Group();
   group.name = 'axisHelper';
@@ -187,6 +218,7 @@ function createAxisHelper(options = {}) {
   const zAxis = new THREE.ArrowHelper(new THREE.Vector3(0,0,1), new THREE.Vector3(0,0,0), axisLength, 0x0000ff, headLen, headWidth);
   group.add(xAxis, yAxis, zAxis);
 
+  // small labels
   const makeTextSprite = (text) => {
     const canvas = document.createElement('canvas');
     canvas.width = 256; canvas.height = 128;
@@ -205,11 +237,22 @@ function createAxisHelper(options = {}) {
   const sy = makeTextSprite('Y'); sy.position.set(0, axisLength + headLen*0.6, 0); group.add(sy);
   const sz = makeTextSprite('Z'); sz.position.set(0, 0, axisLength + headLen*0.6); group.add(sz);
 
+  // center sphere geometry (unit sphere; scale becomes meters)
   const sphereGeometry = new THREE.SphereGeometry(1, 24, 18);
-  const sphereMaterial = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.85 });
+  // light yellow color
+  const sphereMaterial = new THREE.MeshBasicMaterial({ color:0xFFF9B0, transparent:true, opacity:0.95 });
   const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
   sphere.name = 'axisHelperCenter';
   group.add(sphere);
+
+  // halo: slightly bigger translucent sphere
+  const haloGeom = new THREE.SphereGeometry(1, 24, 18);
+  const haloMat = new THREE.MeshBasicMaterial({ color:0xFFFF88, transparent:true, opacity:0.35, depthTest:false });
+  const halo = new THREE.Mesh(haloGeom, haloMat);
+  halo.name = 'axisHelperHalo';
+  halo.visible = false;
+  halo.renderOrder = 999;
+  group.add(halo);
 
   group.position.copy(center);
   axisHelperPosition.copy(center);
@@ -217,19 +260,24 @@ function createAxisHelper(options = {}) {
   scene.add(axisHelper);
 
   updateAxisCenterVisualSize();
-
   return axisHelper;
 }
 
+// update center sphere & halo scale so center looks ~DESIRED_CENTER_PX on screen
 function updateAxisCenterVisualSize() {
   if (!axisHelper) return;
   const sphere = axisHelper.children.find(c => c.name === 'axisHelperCenter');
-  if (!sphere) return;
+  const halo = axisHelper.children.find(c => c.name === 'axisHelperHalo');
+  if (!sphere || !halo) return;
+
   const worldPoint = axisHelper.position.clone();
   const pxPerM = pixelPerMeterAt(worldPoint);
   const desiredMeters = Math.max(0.01, DESIRED_CENTER_PX / Math.max(0.0001, pxPerM));
   const clampedMeters = THREE.MathUtils.clamp(desiredMeters, 0.001, 1000);
+
   sphere.scale.set(clampedMeters, clampedMeters, clampedMeters);
+  halo.scale.set(clampedMeters * 1.6, clampedMeters * 1.6, clampedMeters * 1.6);
+  halo.renderOrder = sphere.renderOrder + 1;
 }
 
 // ---------- Drawing structures ----------
@@ -315,12 +363,10 @@ function segmentScreenDistancePx(pointerScreenPx, seg) {
   return distancePointToSegment2D(pointerScreenPx, aScreen, bScreen);
 }
 
-// ---------- UI logic ----------
+// ---------- UI ----------
 const drawModeCheckbox = document.getElementById('draw-mode');
 const modeRadios = document.querySelectorAll('input[name="tool"]');
 const colorInput = document.getElementById('color');
-const thicknessInput = document.getElementById('thickness');
-const thicknessVal = document.getElementById('thickness-val');
 const eraserControls = document.getElementById('eraser-controls');
 const eraserSizeInput = document.getElementById('eraser-size');
 const eraserVal = document.getElementById('eraser-val');
@@ -328,6 +374,7 @@ const clearBtn = document.getElementById('clear-all');
 const moveAxisBtn = document.getElementById('move-axis');
 const toggleUIButton = document.getElementById('toggle-ui');
 const uiElement = document.getElementById('ui');
+const loadCampiBtn = document.getElementById('load-campi');
 
 let tool = 'pen';
 let drawMode = false;
@@ -358,7 +405,15 @@ drawModeCheckbox.addEventListener('change', ()=> {
   updateCursorAppearance();
 });
 
-thicknessInput.addEventListener('input', ()=> thicknessVal.textContent = thicknessInput.value);
+// thickness slider: only integers, update display
+thicknessInput.addEventListener('input', ()=> {
+  const v = parseInt(thicknessInput.value, 10) || 1;
+  thicknessVal.textContent = v.toString();
+  // keep input value integer (in case)
+  thicknessInput.value = v;
+});
+
+// eraser slider display
 eraserSizeInput.addEventListener('input', ()=> eraserVal.textContent = eraserSizeInput.value);
 
 moveAxisBtn.addEventListener('click', () => {
@@ -393,6 +448,38 @@ toggleUIButton.addEventListener('click', ()=> {
   uiElement.classList.toggle('compact');
 });
 
+// ---------- Load remote Campi (single-shot or replace) ----------
+loadCampiBtn.addEventListener('click', async () => {
+  if (isLoadingCampi) return;
+  if (currentModelSourceUrl === CAMPI_URL && model) {
+    loadCampiBtn.textContent = 'Modello già caricato';
+    setTimeout(()=> loadCampiBtn.textContent = 'Carica modello Campi Flegrei', 1200);
+    return;
+  }
+  if (model) removeModel();
+  isLoadingCampi = true;
+  loadCampiBtn.disabled = true;
+  loadCampiBtn.textContent = 'Caricamento...';
+
+  gltfLoader.load(CAMPI_URL, (gltf) => {
+    model = gltf.scene;
+    scene.add(model);
+    const info = fitCameraToObject(model, 2.0);
+    createAxisHelper({ center: info.center });
+    currentModelSourceUrl = CAMPI_URL;
+    isLoadingCampi = false;
+    loadCampiBtn.disabled = false;
+    loadCampiBtn.textContent = 'Carica modello Campi Flegrei';
+    updateDropHintVisibility();
+  }, undefined, (err) => {
+    console.error('Errore caricamento Campi', err);
+    isLoadingCampi = false;
+    loadCampiBtn.disabled = false;
+    loadCampiBtn.textContent = 'Carica modello Campi Flegrei';
+    alert('Errore nel caricamento del modello Campi Flegrei');
+  });
+});
+
 // ---------- Pointer handlers ----------
 function onPointerMove(event) {
   const rect = renderer.domElement.getBoundingClientRect();
@@ -400,7 +487,29 @@ function onPointerMove(event) {
   pointer.y = - ( (event.clientY - rect.top) / rect.height ) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
 
-  // move axis
+  // halo logic: show halo if moveAxisMode true and pointer near center sphere
+  if (axisHelper) {
+    const sphere = axisHelper.children.find(c => c.name === 'axisHelperCenter');
+    const halo = axisHelper.children.find(c => c.name === 'axisHelperHalo');
+    if (sphere && halo) {
+      const rayOrigin = raycaster.ray.origin;
+      const rayDir = raycaster.ray.direction;
+      const center = axisHelper.position.clone();
+      const v = new THREE.Vector3().subVectors(center, rayOrigin);
+      const projLen = v.dot(rayDir);
+      const closestPoint = new THREE.Vector3().copy(rayOrigin).add(rayDir.clone().multiplyScalar(projLen));
+      const distToRay = center.distanceTo(closestPoint);
+      const sphereRadius = sphere.scale.x;
+      const hoverThreshold = sphereRadius * 1.4;
+      if (moveAxisMode && distToRay <= hoverThreshold) {
+        halo.visible = true;
+      } else {
+        halo.visible = false;
+      }
+    }
+  }
+
+  // move axis dragging
   if (isAxisSelected && moveAxisMode) {
     const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
       camera.getWorldDirection(new THREE.Vector3()).clone().negate(),
@@ -416,10 +525,7 @@ function onPointerMove(event) {
 
   if (drawMode) {
     const p3 = getPointerWorldPoint(event);
-    if (p3) {
-      const snappedP3 = p3.clone();
-      cursorMesh.position.copy(snappedP3);
-    }
+    if (p3) cursorMesh.position.copy(p3);
   }
 
   if (drawing && tool === 'pen' && currentStroke) {
@@ -428,7 +534,7 @@ function onPointerMove(event) {
       const snappedP = p.clone();
       if (!lastPoint) { lastPoint = snappedP.clone(); return; }
       if (snappedP.distanceTo(lastPoint) >= minSegmentDistance) {
-        const thickness_m = parseFloat(thicknessInput.value);
+        const thickness_m = parseInt(thicknessInput.value, 10) || 1;
         const seg = createLineSegmentBetweenPoints(lastPoint.clone(), snappedP.clone(), thickness_m, colorInput.value);
         scene.add(seg);
         currentStroke.segments.push(seg);
@@ -450,7 +556,7 @@ function onPointerMove(event) {
     const pointerScreenPx = new THREE.Vector2(event.clientX - rect.left, event.clientY - rect.top);
     const p3 = getPointerWorldPoint(event);
     if (!p3) return;
-    const eraserSizeMeters = parseFloat(eraserSizeInput.value);
+    const eraserSizeMeters = parseInt(eraserSizeInput.value, 10) || 1;
 
     for (const s of strokes) {
       for (const seg of s.segments) {
@@ -483,11 +589,21 @@ function onPointerDown(event) {
       if (axisHelper) {
         const sphere = axisHelper.children.find(child => child.name === 'axisHelperCenter');
         if (sphere) {
-          const intersects = raycaster.intersectObject(sphere);
-          if (intersects.length > 0) {
+          const rayOrigin = raycaster.ray.origin;
+          const rayDir = raycaster.ray.direction;
+          const center = axisHelper.position.clone();
+          const v = new THREE.Vector3().subVectors(center, rayOrigin);
+          const projLen = v.dot(rayDir);
+          const closestPoint = new THREE.Vector3().copy(rayOrigin).add(rayDir.clone().multiplyScalar(projLen));
+          const distToRay = center.distanceTo(closestPoint);
+          const sphereRadius = sphere.scale.x;
+          const hitThreshold = sphereRadius * 1.4;
+
+          if (distToRay <= hitThreshold) {
             isAxisSelected = true;
             controls.enabled = false;
-            event.preventDefault(); event.stopPropagation(); return;
+            event.preventDefault(); event.stopPropagation();
+            return;
           }
         }
       }
@@ -495,7 +611,8 @@ function onPointerDown(event) {
       controls.enabled = false;
       if (tool === 'pen') {
         drawing = true;
-        currentStroke = { segments: [], color: colorInput.value, thickness_m: parseFloat(thicknessInput.value) };
+        const thickness_m_start = parseInt(thicknessInput.value, 10) || 1;
+        currentStroke = { segments: [], color: colorInput.value, thickness_m: thickness_m_start };
         strokes.push(currentStroke);
 
         const axisOrigin = axisHelper ? axisHelper.position.clone() : new THREE.Vector3(0,0,0);
@@ -505,7 +622,7 @@ function onPointerDown(event) {
         drawingPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(camDir.clone().negate(), axisOrigin);
 
         const tiny = axisOrigin.clone().add(camDir.clone().multiplyScalar(0.001));
-        const seg = createLineSegmentBetweenPoints(axisOrigin.clone(), tiny.clone(), parseFloat(thicknessInput.value), colorInput.value);
+        const seg = createLineSegmentBetweenPoints(axisOrigin.clone(), tiny.clone(), thickness_m_start, colorInput.value);
         scene.add(seg);
         currentStroke.segments.push(seg);
       } else {
@@ -520,7 +637,7 @@ function onPointerDown(event) {
             if (!a || !b) continue;
             const mid = new THREE.Vector3().addVectors(a,b).multiplyScalar(0.5);
             const pxPerM = pixelPerMeterAt(mid);
-            const eraserPx = Math.max(6, parseFloat(eraserSizeInput.value) * pxPerM);
+            const eraserPx = Math.max(6, parseInt(eraserSizeInput.value, 10) * pxPerM);
             const distPx = segmentScreenDistancePx(pointerScreenPx, seg);
             if (distPx <= eraserPx) {
               scene.remove(seg); if (seg.geometry) seg.geometry.dispose(); if (seg.material) seg.material.dispose();
@@ -589,18 +706,16 @@ function updateCursorAppearance() {
   cursorMesh.visible = true;
   if (tool === 'pen') {
     cursorMesh.material = penCursorMat;
-    const r = Math.max(0.2, parseFloat(thicknessInput.value));
+    const r = Math.max(1, parseInt(thicknessInput.value, 10) || 1);
     cursorMesh.scale.set(r, r, r);
   } else {
     cursorMesh.material = eraserCursorMat;
-    const r = Math.max(1.0, parseFloat(eraserSizeInput.value));
+    const r = Math.max(1, parseInt(eraserSizeInput.value, 10) || 1);
     cursorMesh.scale.set(r, r, r);
   }
 }
 
 // ---------- Drag & Drop model loading ----------
-const dropHint = document.getElementById('dropHint');
-
 function handleFileDrop(file) {
   const name = file.name.toLowerCase();
   if (!name.endsWith('.glb') && !name.endsWith('.gltf')) {
@@ -608,17 +723,16 @@ function handleFileDrop(file) {
     return;
   }
   const url = URL.createObjectURL(file);
+  if (model) removeModel();
   gltfLoader.load(url, (gltf) => {
-    if (model) { scene.remove(model); model.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) { if (Array.isArray(c.material)) c.material.forEach(m=>m.dispose()); else c.material.dispose(); } }); model = null; }
     model = gltf.scene;
     scene.add(model);
-
     const info = fitCameraToObject(model, 2.0);
-    const center = info.center;
-    createAxisHelper({ center });
-
-    dropHint.classList.add('hidden');
+    createAxisHelper({ center: info.center });
+    currentModelSourceUrl = 'local:' + file.name;
+    dropHint.classList.add('hidden'); // <-- ensure drop hint hidden after load
     URL.revokeObjectURL(url);
+    updateDropHintVisibility();
   }, undefined, (err) => {
     console.error('load error', err);
     URL.revokeObjectURL(url);
@@ -626,15 +740,13 @@ function handleFileDrop(file) {
   });
 }
 
-window.addEventListener('dragover', (e) => { e.preventDefault(); dropHint.classList.remove('hidden'); });
-window.addEventListener('dragenter', (e) => { e.preventDefault(); dropHint.classList.remove('hidden'); });
+window.addEventListener('dragover', (e) => { e.preventDefault(); if (!model) dropHint.classList.remove('hidden'); });
+window.addEventListener('dragenter', (e) => { e.preventDefault(); if (!model) dropHint.classList.remove('hidden'); });
 window.addEventListener('dragleave', (e) => { e.preventDefault(); /* keep hint until drop or exit */ });
 window.addEventListener('drop', (e) => {
   e.preventDefault();
-  dropHint.classList.add('hidden');
-  const dt = e.dataTransfer;
-  if (!dt || !dt.files || dt.files.length === 0) return;
-  handleFileDrop(dt.files[0]);
+  if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+  handleFileDrop(e.dataTransfer.files[0]);
 });
 
 // ---------- Render loop ----------
@@ -646,6 +758,7 @@ function animate() {
 
 // initialization
 createAxisHelper({ center: new THREE.Vector3(0,0,0) });
+updateDropHintVisibility();
 animate();
 
 // events
